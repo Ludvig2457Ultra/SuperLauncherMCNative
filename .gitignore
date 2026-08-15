@@ -1,0 +1,25 @@
+# Артефакты сборки
+/build_t/
+/dist/
+*.obj
+*.o
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# UPX-распакованные секции
+/UPX0
+/UPX1
+/UPX2
+/SuperLauncherNative/
+
+# Рантайм-данные и чувствительное
+/user_data/
+/temp/
+/logs/
+/accounts.json
+/settings.json
+/ui_settings.json
+/licenses.json
