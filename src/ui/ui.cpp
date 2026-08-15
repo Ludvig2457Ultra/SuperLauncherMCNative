@@ -18,25 +18,30 @@
 
 namespace slui {
 
-const char* kBg = "#1b202e";
-const char* kSidebar = "#161a26";
+// ===== Оригинальная тема SuperLauncher 2.0 (PyQt -> Win32 GDI) =====
+// bg_primary #1a1a2e, bg_secondary #16213e, accent #4facfe,
+// accent_gradient (#667eea, #764ba2), sidebar (14,14,22)->(10,10,18),
+// контент rgba(30,30,40,0.85), границы #313244.
 
 static HBRUSH g_bg, g_edit, g_side;
-static HFONT g_font, g_font_big;
+static HFONT g_font, g_font_big, g_font_title, g_font_header;
 static HCURSOR g_cursor = nullptr;
 
-COLORREF page_bg_color() { return RGB(0x1B, 0x20, 0x2E); }
-COLORREF page_bg_top()    { return RGB(0x22, 0x26, 0x36); }
-COLORREF page_bg_bottom() { return RGB(0x15, 0x18, 0x22); }
-static COLORREF t_side_top()    { return RGB(0x10, 0x12, 0x1A); }
-static COLORREF t_side_bottom() { return RGB(0x1B, 0x1F, 0x2D); }
-static COLORREF t_text()  { return RGB(0xE8, 0xEA, 0xF0); }
-static COLORREF t_edit()  { return RGB(0x13, 0x16, 0x1F); }
-static COLORREF t_accent()       { return RGB(0x6C, 0x8C, 0xFF); }
-static COLORREF t_accent_deep()  { return RGB(0x5B, 0x6C, 0xF0); }
-static COLORREF t_accent_hot()   { return RGB(0x7D, 0x96, 0xFF); }
-static COLORREF t_muted() { return RGB(0x9A, 0xA3, 0xB8); }
-static COLORREF t_border() { return RGB(0x33, 0x3B, 0x55); }
+COLORREF page_bg_color() { return RGB(0x1B, 0x1B, 0x21); }   // контент (плоский)
+COLORREF page_bg_top()    { return RGB(0x1B, 0x1B, 0x21); }
+COLORREF page_bg_bottom() { return RGB(0x1B, 0x1B, 0x21); }
+static COLORREF t_side_top()    { return RGB(0x16, 0x16, 0x1B); } // сайдбар (плоский)
+static COLORREF t_side_bottom() { return RGB(0x16, 0x16, 0x1B); }
+static COLORREF t_text()  { return RGB(0xF2, 0xF2, 0xF4); }       // основной текст
+static COLORREF t_edit()  { return RGB(0x14, 0x14, 0x18); }
+static COLORREF t_accent()       { return RGB(0x4F, 0xAC, 0xFE); } // единственный акцент
+static COLORREF t_accent_deep()  { return RGB(0x3D, 0x8F, 0xD4); } // pressed
+static COLORREF t_accent_hot()   { return RGB(0x6D, 0xB8, 0xFF); } // hover
+static COLORREF t_grad1()        { return RGB(0x66, 0x7E, 0xEA); }
+static COLORREF t_grad2()        { return RGB(0x76, 0x4B, 0xA2); }
+static COLORREF t_muted() { return RGB(0x9A, 0x9A, 0xA4); }       // приглушённый
+static COLORREF t_faint() { return RGB(0x6E, 0x6E, 0x78); }       // едва заметный
+static COLORREF t_border() { return RGB(0x2A, 0x2A, 0x31); }      // разделители
 
 void ui_fill_gradient_v(HDC dc, RECT* r, COLORREF top, COLORREF bottom, int bands) {
     int h = r->bottom - r->top;
@@ -82,13 +87,19 @@ static void theme_init() {
     if (g_bg) return;
     g_bg = CreateSolidBrush(page_bg_color());
     g_edit = CreateSolidBrush(t_edit());
-    g_side = CreateSolidBrush(RGB(0x16, 0x1A, 0x26));
+    g_side = CreateSolidBrush(t_side_top());
     g_font = CreateFontW(-13, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
                          OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                          DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    g_font_big = CreateFontW(-24, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
+    g_font_big = CreateFontW(-20, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                              DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    g_font_title = CreateFontW(-22, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
+                               OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                               DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    g_font_header = CreateFontW(-13, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
+                                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     g_cursor = LoadCursor(nullptr, IDC_HAND);
 }
 
@@ -97,6 +108,20 @@ static HINSTANCE HInst(HWND w) { return (HINSTANCE)GetWindowLongPtrW(w, GWLP_HIN
 HWND MakeLabel(HWND p, int id, const std::string& s, int x, int y, int w, int h) {
     HWND c = CreateWindowExW(0, L"STATIC", sl::s2ws(s).c_str(), WS_CHILD | WS_VISIBLE, x, y, w, h, p, (HMENU)(INT_PTR)id, HInst(p), 0);
     if (g_font) SendMessageW(c, WM_SETFONT, (WPARAM)g_font, TRUE);
+    return c;
+}
+// Заголовок страницы: жирный голубой текст (как "SuperLauncher 2026" в оригинале).
+HWND MakeTitle(HWND p, int id, const std::string& s, int x, int y, int w, int h) {
+    HWND c = CreateWindowExW(0, L"STATIC", sl::s2ws(s).c_str(), WS_CHILD | WS_VISIBLE, x, y, w, h, p, (HMENU)(INT_PTR)id, HInst(p), 0);
+    if (g_font_title) SendMessageW(c, WM_SETFONT, (WPARAM)g_font_title, TRUE);
+    SetPropW(c, L"SLTitle", (HANDLE)1);
+    return c;
+}
+// Подзаголовок секции: полужирный приглушённый текст.
+HWND MakeSub(HWND p, int id, const std::string& s, int x, int y, int w, int h) {
+    HWND c = CreateWindowExW(0, L"STATIC", sl::s2ws(s).c_str(), WS_CHILD | WS_VISIBLE, x, y, w, h, p, (HMENU)(INT_PTR)id, HInst(p), 0);
+    if (g_font_header) SendMessageW(c, WM_SETFONT, (WPARAM)g_font_header, TRUE);
+    SetPropW(c, L"SLSub", (HANDLE)1);
     return c;
 }
 HWND MakeEdit(HWND p, int id, const std::string& s, int x, int y, int w, int h) {
@@ -111,8 +136,8 @@ HWND MakeCombo(HWND p, int id, int x, int y, int w, int h) {
 }
 HWND MakeProgress(HWND p, int id, int x, int y, int w, int h) {
     HWND c = CreateWindowExW(0, PROGRESS_CLASSW, 0, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, x, y, w, h, p, (HMENU)(INT_PTR)id, HInst(p), 0);
-    SendMessageW(c, PBM_SETBKCOLOR, 0, (LPARAM)RGB(0x13, 0x16, 0x20));
-    SendMessageW(c, PBM_SETBARCOLOR, 0, (LPARAM)RGB(0x6C, 0x8C, 0xFF));
+    SendMessageW(c, PBM_SETBKCOLOR, 0, (LPARAM)RGB(0x16, 0x16, 0x20));
+    SendMessageW(c, PBM_SETBARCOLOR, 0, (LPARAM)t_accent());
     return c;
 }
 HWND MakeMemo(HWND p, int id, int x, int y, int w, int h) {
@@ -132,7 +157,7 @@ HBRUSH ui_bg_brush() { theme_init(); return g_bg; }
 HBRUSH ui_edit_brush() { theme_init(); return g_edit; }
 
 // ---------------- отрисовка скруглённых прямоугольников ----------------
-static void FillRound(HDC dc, const RECT& rc, int radius, COLORREF color) {
+void FillRound(HDC dc, const RECT& rc, int radius, COLORREF color) {
     HBRUSH br = CreateSolidBrush(color);
     HBRUSH ob = (HBRUSH)SelectObject(dc, br);
     HPEN op = (HPEN)SelectObject(dc, GetStockObject(NULL_PEN));
@@ -141,7 +166,7 @@ static void FillRound(HDC dc, const RECT& rc, int radius, COLORREF color) {
     SelectObject(dc, op);
     DeleteObject(br);
 }
-static void StrokeRound(HDC dc, const RECT& rc, int radius, COLORREF color) {
+void StrokeRound(HDC dc, const RECT& rc, int radius, COLORREF color) {
     HPEN pn = CreatePen(PS_SOLID, 1, color);
     HPEN op = (HPEN)SelectObject(dc, pn);
     HBRUSH ob = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
@@ -149,6 +174,40 @@ static void StrokeRound(HDC dc, const RECT& rc, int radius, COLORREF color) {
     SelectObject(dc, ob);
     SelectObject(dc, op);
     DeleteObject(pn);
+}
+static void FillRoundGrad(HDC dc, const RECT& rc, int radius, COLORREF top, COLORREF bottom, int bands = 6) {
+    int h = rc.bottom - rc.top;
+    if (h <= 0 || bands <= 0) return;
+    int c1r = GetRValue(top), c1g = GetGValue(top), c1b = GetBValue(top);
+    int c2r = GetRValue(bottom), c2g = GetGValue(bottom), c2b = GetBValue(bottom);
+    for (int i = 0; i < bands; i++) {
+        float t = bands == 1 ? 0.f : (float)i / (float)(bands - 1);
+        RECT row = rc;
+        row.top = rc.top + (int)((long long)i * h / bands);
+        row.bottom = rc.top + (int)((long long)(i + 1) * h / bands);
+        if (row.bottom <= row.top) continue;
+        FillRound(dc, row, radius, RGB((int)(c1r + (c2r - c1r) * t),
+                                       (int)(c1g + (c2g - c1g) * t),
+                                       (int)(c1b + (c2b - c1b) * t)));
+    }
+}
+// Цвет фона сайдбара в точке кнопки (вертикальный градиент t_side_top->t_side_bottom).
+static COLORREF side_bg_at(HWND h) {
+    HWND parent = GetParent(h);
+    if (!parent) return t_side_top();
+    RECT pr;
+    GetClientRect(parent, &pr);
+    RECT rc;
+    GetClientRect(h, &rc);
+    POINT pt = { 0, rc.bottom / 2 };
+    ClientToScreen(h, &pt);
+    ScreenToClient(parent, &pt);
+    int hh = pr.bottom - pr.top;
+    float t = hh > 0 ? (float)pt.y / (float)hh : 0.f;
+    if (t < 0) t = 0; if (t > 1) t = 1;
+    return RGB((int)(GetRValue(t_side_top()) + (GetRValue(t_side_bottom()) - GetRValue(t_side_top())) * t),
+               (int)(GetGValue(t_side_top()) + (GetGValue(t_side_bottom()) - GetGValue(t_side_top())) * t),
+               (int)(GetBValue(t_side_top()) + (GetBValue(t_side_bottom()) - GetBValue(t_side_top())) * t));
 }
 
 // ---------------- SLBtn: кнопка в стиле темы ----------------
@@ -167,18 +226,20 @@ static LRESULT CALLBACK BtnProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 
             COLORREF fill, border;
             if (accent) {
-                fill   = push ? RGB(0x46, 0x57, 0xDE) : hot ? t_accent_hot() : t_accent_deep();
+                // primary: сплошной акцент (единственный цвет акцента в UI)
+                fill   = push ? t_accent_deep() : hot ? t_accent_hot() : t_accent();
                 border = fill;
             } else {
-                fill   = push ? RGB(0x17, 0x1C, 0x2A) : hot ? RGB(0x2C, 0x33, 0x4C) : RGB(0x22, 0x28, 0x3C);
-                border = hot ? t_accent_deep() : t_border();
+                // secondary: плоский нейтральный
+                fill   = push ? RGB(0x20, 0x20, 0x26) : hot ? RGB(0x2E, 0x2E, 0x38) : RGB(0x26, 0x26, 0x2E);
+                border = fill;
             }
             FillRound(dc, rc, 8, fill);
             StrokeRound(dc, rc, 8, border);
 
             SetBkMode(dc, TRANSPARENT);
             HFONT old = (HFONT)SelectObject(dc, g_font);
-            SetTextColor(dc, RGB(0xEC, 0xEF, 0xF6));
+            SetTextColor(dc, RGB(0xFF, 0xFF, 0xFF));
             wchar_t txt[128];
             GetWindowTextW(h, txt, 128);
             RECT tr = rc;
@@ -420,24 +481,27 @@ void LauncherApp::layout() {
     if (!hwnd) return;
     RECT rc;
     GetClientRect(hwnd, &rc);
-    const int side = 190;
-    MoveWindow(sidebar, 0, 0, side, rc.bottom, TRUE);
-    // страницы — только в контентной области (правее сайдбара)
+    const int M = 16;           // поля
+    const int side = 200;       // ширина сайдбара
+    MoveWindow(sidebar, M, M, side, rc.bottom - 2 * M, TRUE);
+    // страницы — контентная панель правее сайдбара
+    int px = M + side + M;
+    int pw = rc.right - px - M;
+    int ph = rc.bottom - 2 * M;
     for (size_t i = 0; i < pages.size(); i++) {
-        MoveWindow(pages[i], side, 0, rc.right - side, rc.bottom, TRUE);
+        MoveWindow(pages[i], px, M, pw, ph, TRUE);
     }
-    // кнопки сайдбара
-    int y = 96;
+    // кнопки сайдбара: ниже подписи (40px), шаг 40
+    int y = 52;
     for (size_t i = 0; i < nav.size(); i++) {
         HWND b = nav[i];
-        // перерисовка выбранной
-        MoveWindow(b, 10, y, side - 20, 40, TRUE);
+        MoveWindow(b, 10, y, side - 20, 38, TRUE);
         LONG_PTR sel = (i == (size_t)cur_page) ? 1 : 0;
         if (GetWindowLongPtrW(b, GWLP_USERDATA) != sel) {
             SetWindowLongPtrW(b, GWLP_USERDATA, sel);
             InvalidateRect(b, 0, TRUE);
         }
-        y += 52;
+        y += 40;
     }
 }
 
@@ -447,34 +511,31 @@ static LRESULT CALLBACK SideProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         HDC dc = BeginPaint(h, &ps);
         RECT rc;
         GetClientRect(h, &rc);
-        ui_fill_gradient_v(dc, &rc, t_side_top(), t_side_bottom());
+        // плоский фон сайдбара
+        HBRUSH bg = CreateSolidBrush(t_side_top());
+        FillRect(dc, &rc, bg);
+        DeleteObject(bg);
         SetBkMode(dc, TRANSPARENT);
-        // лого: "Super" белым + "Launcher" акцентным
-        HFONT old = (HFONT)SelectObject(dc, g_font_big);
-        const wchar_t* a = L"Super";
-        const wchar_t* b = L"Launcher";
-        SIZE sa, sb;
-        GetTextExtentPoint32W(dc, a, 5, &sa);
-        GetTextExtentPoint32W(dc, b, 8, &sb);
-        int total = sa.cx + sb.cx;
-        int x0 = (rc.right - total) / 2;
-        RECT ra = { x0, 18, rc.right, 50 };
-        SetTextColor(dc, RGB(0xFF, 0xFF, 0xFF));
-        DrawTextW(dc, a, -1, &ra, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT rb = { x0 + sa.cx, 18, rc.right, 50 };
-        SetTextColor(dc, t_accent());
-        DrawTextW(dc, b, -1, &rb, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        // акцентная полоса под лого
-        RECT bar = { 24, 56, rc.right - 24, 58 };
-        HBRUSH ac = CreateSolidBrush(t_accent_deep());
-        FillRect(dc, &bar, ac);
-        DeleteObject(ac);
-        // версия
-        SelectObject(dc, g_font);
-        SetTextColor(dc, t_muted());
-        RECT vr = { 0, 66, 190, 88 };
-        DrawTextW(dc, L"версия 2.0", -1, &vr, DT_CENTER | DT_SINGLELINE);
+
+        // маленькая нейтральная подпись
+        HFONT old = (HFONT)SelectObject(dc, g_font_header);
+        SetTextColor(dc, t_text());
+        RECT wt = { 12, 12, rc.right - 8, 40 };
+        DrawTextW(dc, L"SuperLauncher", -1, &wt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         SelectObject(dc, old);
+
+        // разделитель справа
+        RECT line = { rc.right - 1, 0, rc.right, rc.bottom };
+        HBRUSH lb = CreateSolidBrush(t_border());
+        FillRect(dc, &line, lb);
+        DeleteObject(lb);
+
+        // версия внизу
+        SelectObject(dc, g_font);
+        SetTextColor(dc, t_faint());
+        RECT vr = { 12, rc.bottom - 34, rc.right - 8, rc.bottom - 6 };
+        DrawTextW(dc, L"v2.0.0", -1, &vr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
         EndPaint(h, &ps);
         return 0;
     }
@@ -495,16 +556,18 @@ static LRESULT CALLBACK NavBtnProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             bool sel = (st & 1) != 0;
             bool hover = (st & 2) != 0;
             if (sel) {
-                FillRound(dc, rc, 9, RGB(0x25, 0x2C, 0x44));
-                RECT pill = { rc.left + 7, rc.top + 9, rc.left + 13, rc.bottom - 9 };
-                FillRound(dc, pill, 3, t_accent());
+                // выбранная: плоская заливка светлее фона
+                FillRound(dc, rc, 8, RGB(0x23, 0x23, 0x29));
             } else if (hover) {
-                FillRound(dc, rc, 9, RGB(0x17, 0x1B, 0x29));
+                FillRound(dc, rc, 8, RGB(0x1D, 0x1D, 0x23));
+            } else {
+                // обычная: фон сайдбара под кнопкой
+                FillRound(dc, rc, 8, side_bg_at(h));
             }
             SetBkMode(dc, TRANSPARENT);
             HFONT old = (HFONT)SelectObject(dc, g_font);
             SetTextColor(dc, sel ? RGB(0xFF, 0xFF, 0xFF)
-                                 : hover ? RGB(0xEC, 0xEF, 0xF6)
+                                 : hover ? RGB(0xC8, 0xC8, 0xD0)
                                          : t_muted());
             wchar_t txt[128];
             GetWindowTextW(h, txt, 128);
@@ -564,7 +627,10 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             HDC dc = BeginPaint(h, &ps);
             RECT rc;
             GetClientRect(h, &rc);
-            ui_fill_gradient_v(dc, &rc, page_bg_top(), page_bg_bottom());
+            // фон окна: единый плоский тон
+            HBRUSH br = CreateSolidBrush(RGB(0x10, 0x10, 0x14));
+            FillRect(dc, &rc, br);
+            DeleteObject(br);
             EndPaint(h, &ps);
             return 0;
         }
@@ -649,21 +715,21 @@ bool LauncherApp::init(HINSTANCE hi, int cmdshow) {
 
     hwnd = CreateWindowExW(0, cls, L"SuperLauncher 2.0",
                            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                           1100, 720, nullptr, nullptr, hi, nullptr);
+                           1280, 800, nullptr, nullptr, hi, nullptr);
 if (!hwnd) return false;
     enable_dark_titlebar(hwnd);
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)this);
     s_app = this;
 
     sidebar = CreateWindowExW(0, L"SLSide", nullptr, WS_CHILD | WS_VISIBLE,
-                              0, 0, 190, 720, hwnd, nullptr, hi, nullptr);
+                              12, 12, 210, 760, hwnd, nullptr, hi, nullptr);
 
 static const char* labels[] = { "Главная", "Аккаунт", "Моды", "Сборки", "Скины",
                                     "Новости", "Обновления", "Серверы", "Настройки",
                                     "Minecraft", "AI Агент" };
     for (int i = 0; i < 11; i++) {
         HWND b = CreateWindowExW(0, L"SLNavBtn", sl::s2ws(labels[i]).c_str(),
-                                 WS_CHILD | WS_VISIBLE, 10, 24 + i * 52, 170, 40,
+                                 WS_CHILD | WS_VISIBLE, 10, 24 + i * 44, 190, 42,
                                  sidebar, (HMENU)(INT_PTR)(1000 + i), hi, nullptr);
         nav.push_back(b);
     }

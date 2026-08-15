@@ -17,7 +17,15 @@ void ui_fill_gradient_v(HDC dc, RECT* rc, COLORREF top, COLORREF bottom, int ban
 // Горизонтальный градиент (banded) по области rc.
 void ui_fill_gradient_h(HDC dc, RECT* rc, COLORREF left, COLORREF right, int bands = 32);
 
+// Заливка/обводка скруглённого прямоугольника (используются страницами).
+void FillRound(HDC dc, const RECT& rc, int radius, COLORREF color);
+void StrokeRound(HDC dc, const RECT& rc, int radius, COLORREF color);
+
 HWND MakeLabel(HWND parent, int id, const std::string& text, int x, int y, int w, int h);
+// Заголовок страницы (жирный, акцентный).
+HWND MakeTitle(HWND parent, int id, const std::string& text, int x, int y, int w, int h);
+// Подзаголовок секции (полужирный, приглушённый).
+HWND MakeSub(HWND parent, int id, const std::string& text, int x, int y, int w, int h);
 HWND MakeEdit(HWND parent, int id, const std::string& text, int x, int y, int w, int h);
 HWND MakeCombo(HWND parent, int id, int x, int y, int w, int h);
 HWND MakeProgress(HWND parent, int id, int x, int y, int w, int h);

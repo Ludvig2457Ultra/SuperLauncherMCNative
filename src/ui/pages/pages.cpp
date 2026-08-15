@@ -46,7 +46,10 @@ static LRESULT CALLBACK PageProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_CTLCOLORSTATIC: {
             HDC dc = (HDC)w;
             SetBkColor(dc, page_bg_color());
-            SetTextColor(dc, RGB(0xE8, 0xEA, 0xF0));
+            HWND c = (HWND)l;
+            if (GetPropW(c, L"SLTitle")) SetTextColor(dc, RGB(0xFF, 0xFF, 0xFF));
+            else if (GetPropW(c, L"SLSub")) SetTextColor(dc, RGB(0x9A, 0x9A, 0xA4));
+            else SetTextColor(dc, RGB(0xF2, 0xF2, 0xF4));
             return (LRESULT)ui_bg_brush();
         }
         case WM_CTLCOLORDLG:
@@ -55,8 +58,8 @@ static LRESULT CALLBACK PageProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_CTLCOLOREDIT:
         case WM_CTLCOLORLISTBOX: {
             HDC dc = (HDC)w;
-            SetBkColor(dc, RGB(0x13, 0x16, 0x1F));
-            SetTextColor(dc, RGB(0xE8, 0xEA, 0xF0));
+            SetBkColor(dc, RGB(0x14, 0x14, 0x18));
+            SetTextColor(dc, RGB(0xF2, 0xF2, 0xF4));
             return (LRESULT)ui_edit_brush();
         }
         case WM_ERASEBKGND: return 1;
@@ -65,10 +68,8 @@ static LRESULT CALLBACK PageProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             HDC dc = BeginPaint(h, &ps);
             RECT rc;
             GetClientRect(h, &rc);
+            // контентная панель: плоский однотонный фон
             ui_fill_gradient_v(dc, &rc, page_bg_top(), page_bg_bottom());
-            // акцентная полоса сверху
-            RECT bar = { rc.left, rc.top, rc.right, rc.top + 3 };
-            ui_fill_gradient_h(dc, &bar, RGB(0x5B, 0x6C, 0xF0), RGB(0x47, 0xD0, 0xC0));
             EndPaint(h, &ps);
             return 0;
         }

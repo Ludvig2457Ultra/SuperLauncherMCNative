@@ -45,13 +45,13 @@ HWND create_home_page(HINSTANCE hi, HWND parent, LauncherApp* app) {
     p->on_show = on_show;
 
     int x = 40, y = 30, cw = 560;
-    MakeLabel(h, 0, "SuperLauncher 2026", x, y, cw, 34);
-    y += 48;
+    MakeTitle(h, 0, "SuperLauncher 2026", x, y, cw, 40);
+    y += 54;
 
     d->name_lbl = MakeLabel(h, ID_H_NAME, "👤 Гость", x, y, 300, 30);
     y += 48;
 
-    MakeLabel(h, 0, "Быстрые действия", x, y, 300, 24);
+    MakeSub(h, 0, "Быстрые действия", x, y, 300, 24);
     y += 40;
 
     struct QA { int id; const char* txt; };

@@ -64,14 +64,14 @@ static LRESULT CALLBACK LoginProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         case WM_CTLCOLORSTATIC: {
             HDC dc = (HDC)w;
-            SetBkColor(dc, RGB(0x1B, 0x1E, 0x28));
-            SetTextColor(dc, RGB(0xE8, 0xEA, 0xF0));
+            SetBkColor(dc, RGB(0x1B, 0x1B, 0x21));
+            SetTextColor(dc, RGB(0xF2, 0xF2, 0xF4));
             return (LRESULT)ui_bg_brush();
         }
         case WM_CTLCOLOREDIT: {
             HDC dc = (HDC)w;
-            SetBkColor(dc, RGB(0x14, 0x17, 0x20));
-            SetTextColor(dc, RGB(0xE8, 0xEA, 0xF0));
+            SetBkColor(dc, RGB(0x14, 0x14, 0x18));
+            SetTextColor(dc, RGB(0xF2, 0xF2, 0xF4));
             return (LRESULT)ui_edit_brush();
         }
         case WM_CTLCOLORDLG:
@@ -218,14 +218,14 @@ static LRESULT CALLBACK CreateServerProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         case WM_CTLCOLORSTATIC: {
             HDC dc = (HDC)w;
-            SetBkColor(dc, RGB(0x1B, 0x1E, 0x28));
-            SetTextColor(dc, RGB(0xE8, 0xEA, 0xF0));
+            SetBkColor(dc, RGB(0x1B, 0x1B, 0x21));
+            SetTextColor(dc, RGB(0xF2, 0xF2, 0xF4));
             return (LRESULT)ui_bg_brush();
         }
         case WM_CTLCOLOREDIT: {
             HDC dc = (HDC)w;
-            SetBkColor(dc, RGB(0x14, 0x17, 0x20));
-            SetTextColor(dc, RGB(0xE8, 0xEA, 0xF0));
+            SetBkColor(dc, RGB(0x14, 0x14, 0x18));
+            SetTextColor(dc, RGB(0xF2, 0xF2, 0xF4));
             return (LRESULT)ui_edit_brush();
         }
         case WM_CTLCOLORDLG:
