@@ -1,5 +1,7 @@
 # Артефакты сборки
 /build_t/
+/build/
+/build-ninja/
 /dist/
 *.obj
 *.o
