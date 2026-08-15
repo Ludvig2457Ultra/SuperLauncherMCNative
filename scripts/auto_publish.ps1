@@ -61,15 +61,16 @@ $watcher.NotifyFilter = [System.IO.NotifyFilters]::LastWrite -bor `
                         [System.IO.NotifyFilters]::DirectoryName -bor `
                         [System.IO.NotifyFilters]::Size
 
-$script:Dirty = $false
-$script:LastChange = [DateTime]::MinValue
+# NOTE: event actions run in a separate runspace, so shared state MUST be in $global scope
+$global:AP_Dirty = $false
+$global:AP_LastChange = [DateTime]::MinValue
 
 $filter = {
     $fp = $EventArgs.FullPath
     # ignore the git repo itself
     if ($fp -like '*\.git\*') { return }
-    $script:Dirty = $true
-    $script:LastChange = [DateTime]::Now
+    $global:AP_Dirty = $true
+    $global:AP_LastChange = [DateTime]::Now
 }
 
 $evCreated = Register-ObjectEvent -InputObject $watcher -EventName 'Created' -Action $filter
@@ -86,8 +87,8 @@ while ($true) {
     $now = [DateTime]::Now
 
     # 3s quiet period after the last change (avoid spamming during builds)
-    if ($script:Dirty -and ($now - $script:LastChange).TotalSeconds -ge 3) {
-        $script:Dirty = $false
+    if ($global:AP_Dirty -and ($now - $global:AP_LastChange).TotalSeconds -ge 3) {
+        $global:AP_Dirty = $false
         Write-Log 'Changes detected, publishing...'
         Invoke-Publish
         continue
