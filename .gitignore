@@ -27,3 +27,8 @@
 # Диагностика/скриншоты
 shot.bmp
 shot.png
+
+# Minecraft-сервер (рантайм: jar, мир, логи)
+/server/
+# лог установщика NeoForge (рантайм-мусор)
+*.installer.jar.log

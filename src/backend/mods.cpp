@@ -270,40 +270,40 @@ static bool dl_json(const std::string& url, std::string& out, std::string& err) 
     return true;
 }
 
-bool install_modpack(const std::string& url, bool is_local,
-                     const std::string& mc_dir,
-                     std::function<void(const std::string&, float, float)> callback,
-                     std::string& out_name, std::string& err) {
-    std::string tmp_dir = path_join(app_root_utf8(), "temp");
+// ---- разобрать modrinth.index.json: получить локальный путь mrpack и объект index ----
+static bool obtain_mrpack(const std::string& url, bool is_local, const std::string& tmp_dir,
+                          std::string& mrpack,
+                          std::function<void(const std::string&, float, float)> callback,
+                          std::string& err) {
     mkdirs(tmp_dir);
-    std::string mrpack = path_join(tmp_dir, "install.mrpack");
-    if (!is_local) {
-        if (callback) callback("Скачивание сборки...", 0.05f, 1.0f);
-        if (!http_download(url.c_str(), mrpack, nullptr, nullptr, netcfg())) {
-            err = "Не удалось скачать сборку";
-            return false;
-        }
-    } else {
+    mrpack = path_join(tmp_dir, "install.mrpack");
+    if (is_local) {
         mrpack = url;
         if (!file_exists(mrpack)) { err = "Файл не найден"; return false; }
+        return true;
     }
+    if (callback) callback("Скачивание сборки...", 0.05f, 1.0f);
+    if (!http_download(url.c_str(), mrpack, nullptr, nullptr, netcfg())) {
+        err = "Не удалось скачать сборку";
+        return false;
+    }
+    return true;
+}
 
-    if (callback) callback("Распаковка...", 0.10f, 1.0f);
+// ---- распаковать mrpack и прочитать modrinth.index.json -> idx ----
+static bool read_pack_index(const std::string& mrpack, const std::string& tmp_dir, Value& idx) {
     std::string ex = path_join(tmp_dir, "install_extract");
     mkdirs(ex);
     zip_extract_all(mrpack, ex);
-
-    // modrinth.index.json
     std::string idx_path = path_join(ex, "modrinth.index.json");
-    if (!file_exists(idx_path)) {
-        err = "modrinth.index.json не найден в .mrpack";
-        // cleanup temps
-        return false;
-    }
+    if (!file_exists(idx_path)) return false;
     std::string text = read_file_text(idx_path);
-    Value idx;
-    if (text.empty() || !parse(text, idx)) { err = "Неверный modrinth.index.json"; return false; }
+    if (text.empty() || !parse(text, idx)) return false;
+    return true;
+}
 
+// ---- собрать безопасное имя сборки из index ----
+static std::string derive_pack_name(const Value& idx) {
     std::string name = "modpack";
     if (const Value* x = idx.get("name"); x && x->is_str()) {
         name = x->as_string();
@@ -313,20 +313,30 @@ bool install_modpack(const std::string& url, bool is_local,
         }
         if (name.empty()) name = "modpack";
     }
-    out_name = name;
+    return name;
+}
 
-    // dependencies.minecraft + загрузчик
-    std::string mc_version = "", loader = "vanilla";
-    if (const Value* deps = idx.get("dependencies"); deps && deps->is_obj()) {
-        if (const Value* mc = deps->get("minecraft"); mc && mc->is_str()) mc_version = mc->as_string();
-        const char* lds[] = { "fabric", "quilt", "neoforge", "forge" };
-        for (const char* ld : lds) {
-            if (const Value* v = deps->get(ld); v && v->is_str()) { loader = ld; break; }
+// ---- путь файла внутри сборки -> URL первого download (и защита от path traversal) ----
+static std::string file_download_url(const Value& idx, const std::string& fpath) {
+    const Value* fl = idx.get("files");
+    if (!fl || !fl->is_arr()) return "";
+    for (size_t i = 0; i < fl->size(); i++) {
+        const Value& f = fl->at(i);
+        if (!f.is_obj()) continue;
+        const Value* p = f.get("path");
+        if (p && p->is_str() && p->as_string() == fpath) {
+            if (const Value* dl = f.get("downloads"); dl && dl->is_arr() && dl->size() > 0)
+                if (dl->at(0).is_str()) return dl->at(0).as_string();
+            break;
         }
     }
+    return "";
+}
 
-    // files
-    std::vector<std::string> files;
+// ---- скачать все files сборки в is директорию ----
+static void download_pack_files(const Value& idx, const std::string& mc_dir, std::vector<std::string>& files,
+                                std::function<void(const std::string&, float, float)> callback) {
+    files.clear();
     if (const Value* fl = idx.get("files"); fl && fl->is_arr()) {
         for (size_t i = 0; i < fl->size(); i++) {
             const Value& f = fl->at(i);
@@ -338,26 +348,11 @@ bool install_modpack(const std::string& url, bool is_local,
     int done = 0;
     for (auto& fpath : files) {
         if (callback) callback("Установка " + fpath + "...", base + step * done, 1.0f);
-        // скачаем первый download
-        // найдём запись files[] с path == fpath
-        std::string furl;
-        if (const Value* fl = idx.get("files"); fl && fl->is_arr()) {
-            for (size_t i = 0; i < fl->size(); i++) {
-                const Value& f = fl->at(i);
-                if (!f.is_obj()) continue;
-                const Value* p = f.get("path");
-                if (p && p->is_str() && p->as_string() == fpath) {
-                    if (const Value* dl = f.get("downloads"); dl && dl->is_arr() && dl->size() > 0) {
-                        if (dl->at(0).is_str()) furl = dl->at(0).as_string();
-                    }
-                    break;
-                }
-            }
-        }
         // защита от path traversal
         std::string clean = fpath;
         while (clean.find("..") != std::string::npos) clean.replace(clean.find(".."), 2, "_");
         std::string dst = path_join(mc_dir, clean);
+        std::string furl = file_download_url(idx, fpath);
         if (furl.empty()) continue;
         mkdirs(parent_dir(dst));
         if (file_exists(dst)) continue;
@@ -366,33 +361,67 @@ bool install_modpack(const std::string& url, bool is_local,
         }
         done++;
     }
+}
+
+// ---- рекурсивный копировщик папки (overrides) ----
+static void recopy_dir(const std::string& s, const std::string& d) {
+    if (!file_exists(s)) return;
+    mkdirs(d);
+    WIN32_FIND_DATAA fd;
+    HANDLE ht = FindFirstFileA((s + "\\*").c_str(), &fd);
+    if (ht == INVALID_HANDLE_VALUE) return;
+    do {
+        if (fd.cFileName[0] == '.') continue;
+        std::string sp = s + "\\" + fd.cFileName;
+        std::string dp = d + "/" + fd.cFileName;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            recopy_dir(sp, dp);
+        } else {
+            if (!file_exists(dp)) copy_file(sp, dp);
+        }
+    } while (FindNextFileA(ht, &fd));
+    FindClose(ht);
+}
+
+bool install_modpack(const std::string& url, bool is_local,
+                     const std::string& mc_dir,
+                     std::function<void(const std::string&, float, float)> callback,
+                     std::string& out_name, std::string& err) {
+    std::string tmp_dir = path_join(app_root_utf8(), "temp");
+    std::string mrpack;
+    if (!obtain_mrpack(url, is_local, tmp_dir, mrpack, callback, err)) return false;
+
+    if (callback) callback("Распаковка...", 0.10f, 1.0f);
+    Value idx;
+    if (!read_pack_index(mrpack, tmp_dir, idx)) {
+        err = "modrinth.index.json не найден в .mrpack";
+        return false;
+    }
+
+    std::string name = derive_pack_name(idx);
+    out_name = name;
+
+    // зависимости.minecraft + загрузчик
+    std::string mc_version = "", loader = "vanilla";
+    if (const Value* deps = idx.get("dependencies"); deps && deps->is_obj()) {
+        if (const Value* mc = deps->get("minecraft"); mc && mc->is_str()) mc_version = mc->as_string();
+        const char* lds[] = { "fabric", "quilt", "neoforge", "forge" };
+        for (const char* ld : lds) {
+            if (const Value* v = deps->get(ld); v && v->is_str()) { loader = ld; break; }
+        }
+    }
+
+    std::vector<std::string> files;
+    download_pack_files(idx, mc_dir, files, callback);
 
     // overrides + client-overrides
     if (callback) callback("Копирование overrides...", 0.85f, 1.0f);
-    // Рекурсивный копировщик
-    auto recopy = [&](auto&& self, const std::string& s, const std::string& d) -> void {
-        if (!file_exists(s)) return;
-        mkdirs(d);
-        WIN32_FIND_DATAA fd;
-        HANDLE ht = FindFirstFileA((s + "\\*").c_str(), &fd);
-        if (ht == INVALID_HANDLE_VALUE) return;
-        do {
-            if (fd.cFileName[0] == '.') continue;
-            std::string sp = s + "\\" + fd.cFileName;
-            std::string dp = d + "/" + fd.cFileName;
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                self(self, sp, dp);
-            } else {
-                if (!file_exists(dp)) copy_file(sp, dp);
-            }
-        } while (FindNextFileA(ht, &fd));
-        FindClose(ht);
-    };
-    recopy(recopy, path_join(ex, "overrides"), mc_dir);
-    recopy(recopy, path_join(ex, "client-overrides"), mc_dir);
+    recopy_dir(path_join(tmp_dir, "install_extract/overrides"), mc_dir);
+    recopy_dir(path_join(tmp_dir, "install_extract/client-overrides"), mc_dir);
 
     if (callback) callback("Дедупликация модов...", 0.92f, 1.0f);
     int dedup = deduplicate_mods(mc_dir);
+    (void)dedup;
     if (callback) callback("Готово", 1.0f, 1.0f);
     log_info("install_modpack: '" + name + "' mc=" + mc_version + " loader=" + loader);
 

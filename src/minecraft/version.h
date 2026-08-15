@@ -46,9 +46,13 @@ struct VersionMeta {
     std::string id;
     std::string type;
     std::string main_class;
+    std::string inherits_from;       // "inheritsFrom" (Forge/NeoForge-клиенты)
     std::string assets;              // для старых: "legacy"/"pre-1.6"
     std::string innerjar;            // например "client-extra" (rare)
     std::string client_path;         // путь к клиент-джар в versions/<id>/
+    std::string client_url;          // downloads.client.url
+    std::string client_sha1;         // downloads.client.sha1
+    std::string client_owner;        // версия, в чьей папке лежит клиент-джар
     std::string asset_index_name;
     std::string asset_index_sha1;
     std::string asset_index_url = "https://piston-meta.mojang.com/mc/assets/";
@@ -77,5 +81,15 @@ bool install_version_json(const std::string& version_id, const std::string& mc_d
 
 // Распарсить уже скачанный version.json.
 bool parse_version_json(const std::string& text, VersionMeta* out, std::string* err = nullptr);
+
+// Загрузить версию с учётом наследования (inheritsFrom): скачивает <id>.json
+// при отсутствии и рекурсивно сливает версии-предки (логика, как в
+// minecraft-launcher-lib / VanillaLauncher). Возвращает "эффективную" мету.
+bool load_version_meta_merged(const std::string& version_id, const std::string& mc_dir,
+                              VersionMeta* out, std::string* err = nullptr);
+
+// По цепочке наследования найти реальный клиент-джар (versions/<v>/<v>.jar),
+// который существует на диске. Возвращает "" если не найден.
+std::string find_client_jar_in_chain(const std::string& version_id, const std::string& mc_dir);
 
 } // namespace sl

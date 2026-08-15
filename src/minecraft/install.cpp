@@ -120,38 +120,24 @@ static bool ensure_client_jar(const string& mc_dir, const VersionMeta& m, Instal
 bool install_minecraft_version(const string& version_id, const string& mc_dir,
                                const string& manifest_url, InstallProgress* progress,
                                string* err, bool verify_only) {
+    (void)manifest_url; // json качается сам (с учётом наследования)
     VersionMeta m;
-    if (!install_version_json(version_id, mc_dir, manifest_url, &m, err)) return false;
+    if (!load_version_meta_merged(version_id, mc_dir, &m, err)) return false;
     notify(progress, "Установка " + version_id, 0, 0);
 
-    // 1. client.jar
-    {
-        // определим url клиент-джар из version json напрямую
-        string ver_dir = path_join(mc_dir, "versions/" + version_id);
-        string jp = path_join(ver_dir, version_id + ".jar");
-        if (!verify_file_sha1(jp, "")) {
+    // 1. client.jar (для vanilla; у loader-ов джар принадлежит версии-предку)
+    if (!m.client_url.empty()) {
+        string owner = m.client_owner.empty() ? version_id : m.client_owner;
+        string jp = path_join(path_join(path_join(mc_dir, "versions"), owner), owner + ".jar");
+        if (!verify_file_sha1(jp, m.client_sha1)) {
             if (verify_only) { if (err) *err = "client jar missing"; return false; }
-            // скачиваем из version.json: парсим заново чтобы взять url
-            string text = read_file_text(path_join(ver_dir, version_id + ".json"));
-            using namespace sl::json;
-            Value root;
-            if (parse(text, root)) {
-                const Value* dl = root.get("downloads");
-                const Value* client = dl ? dl->get("client") : nullptr;
-                if (client && client->is_obj()) {
-                    const Value* u = client->get("url");
-                    const Value* s = client->get("sha1");
-                    if (u && !u->as_string().empty()) {
-                        mkdirs(parent_dir(jp));
-                        notify(progress, "Скачивание " + version_id + ".jar", 0, 0);
-                        bool ok = http_download(u->as_string().c_str(), jp, nullptr, nullptr, g_net_cfg);
-                        if (!ok) { if (err) *err = "client jar download failed"; return false; }
-                        if (s && !s->as_string().empty() && !verify_file_sha1(jp, s->as_string())) {
-                            if (err) *err = "client jar sha1 mismatch";
-                            return false;
-                        }
-                    }
-                }
+            mkdirs(parent_dir(jp));
+            notify(progress, "Скачивание " + owner + ".jar", 0, 0);
+            bool ok = http_download(m.client_url.c_str(), jp, nullptr, nullptr, g_net_cfg);
+            if (!ok) { if (err) *err = "client jar download failed"; return false; }
+            if (!m.client_sha1.empty() && !verify_file_sha1(jp, m.client_sha1)) {
+                if (err) *err = "client jar sha1 mismatch";
+                return false;
             }
         }
     }

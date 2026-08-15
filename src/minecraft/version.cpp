@@ -3,6 +3,7 @@
 #include "../core/paths.h"
 #include "../core/log.h"
 #include "../net/http.h"
+#include <set>
 
 namespace sl {
 
@@ -127,6 +128,7 @@ bool parse_version_json(const std::string& text, VersionMeta* out, std::string* 
     if ((x = root.get("mainClass"))) out->main_class = x->as_string();
     if ((x = root.get("assets"))) out->assets = x->as_string();
     if ((x = root.get("minecraftArguments"))) out->minecraft_arguments = x->as_string();
+    if ((x = root.get("inheritsFrom"))) out->inherits_from = x->as_string();
 
     const Value* ai = root.get("assetIndex");
     if (ai && ai->is_obj()) {
@@ -141,8 +143,11 @@ bool parse_version_json(const std::string& text, VersionMeta* out, std::string* 
         const Value* client = dl->get("client");
         if (client && client->is_obj()) {
             Artifact a; parse_artifact(*client, a);
-            if (!a.sha1.empty()) out->client_path = a.path; // на случай custom path
-            (void)a;
+            if (!a.sha1.empty()) {
+                out->client_path = a.path.empty() ? std::string("client.jar") : a.path;
+                out->client_url = a.url;
+                out->client_sha1 = a.sha1;
+            }
         }
     }
 
@@ -230,6 +235,159 @@ bool install_version_json(const std::string& version_id, const std::string& mc_d
     else m.client_path = path_join(ver_dir, file_name(m.client_path));
     if (out) *out = m;
     return true;
+}
+
+// Имя библиотеки без версии: "group:name:version[:classifier]" -> "group:name"
+// (как _get_lib_name_without_version в minecraft-launcher-lib).
+static std::string lib_name_without_version(const std::string& name) {
+    if (name.empty()) return name;
+    std::string::size_type last = name.rfind(':');
+    if (last == std::string::npos) return name;
+    return name.substr(0, last);
+}
+
+// Слить версию-наследника с версией-предком (семантика VanillaLauncher
+// / minecraft-launcher-lib inherit_json).
+static VersionMeta merge_inherited(const VersionMeta& child, const VersionMeta& parent) {
+    VersionMeta out = child;
+
+    // библиотеки: дочерние + предковые, чьё имя-без-версии не занято дочерними.
+    // ВАЖНО: set заполняем ТОЛЬКО именами дочерних — классификаторы родителя
+    // (natives-windows, unsafe и т.п.) не должны вычёркивать друг друга.
+    std::set<std::string> names;
+    for (auto& l : out.libraries) names.insert(lib_name_without_version(l.name));
+    for (auto& l : parent.libraries) {
+        std::string n = lib_name_without_version(l.name);
+        if (names.find(n) == names.end())
+            out.libraries.push_back(l);
+    }
+
+    // аргументы: дочерние идут первыми, затем предковые (-cp ${classpath} в хвосте)
+    std::vector<std::string> jv = out.jvm_args;
+    jv.insert(jv.end(), parent.jvm_args.begin(), parent.jvm_args.end());
+    out.jvm_args = jv;
+    std::vector<std::string> ga = out.game_args;
+    ga.insert(ga.end(), parent.game_args.begin(), parent.game_args.end());
+    out.game_args = ga;
+
+    // приоритет у наследника
+    if (out.main_class.empty()) out.main_class = parent.main_class;
+    if (out.type.empty()) out.type = parent.type;
+    if (out.assets.empty()) out.assets = parent.assets;
+    if (out.minecraft_arguments.empty()) out.minecraft_arguments = parent.minecraft_arguments;
+    if (out.java_major <= 0) out.java_major = parent.java_major;
+    if (out.asset_index_name.empty()) {
+        out.asset_index_name = parent.asset_index_name;
+        out.asset_index_sha1 = parent.asset_index_sha1;
+        out.asset_index_url = parent.asset_index_url;
+        out.asset_index_size = parent.asset_index_size;
+    }
+    if (out.client_url.empty() && out.client_sha1.empty()) {
+        out.client_url = parent.client_url;
+        out.client_sha1 = parent.client_sha1;
+        out.client_owner = parent.client_owner;
+    }
+    return out;
+}
+
+bool load_version_meta_merged(const std::string& version_id, const std::string& mc_dir,
+                              VersionMeta* out, std::string* err) {
+    // 1. гарантируем файл versions/<id>/<id>.json
+    string versions_dir = path_join(mc_dir, "versions");
+    string ver_dir = path_join(versions_dir, version_id);
+    mkdirs(ver_dir);
+    string json_path = path_join(ver_dir, version_id + ".json");
+    if (!file_exists(json_path)) {
+        // скачиваем по манифесту
+        std::vector<ManifestVersion> list;
+        if (!fetch_manifest(list)) {
+            if (err) *err = "cannot load manifest for " + version_id;
+            return false;
+        }
+        string url;
+        for (auto& v : list) if (v.id == version_id) { url = v.url; break; }
+        if (url.empty()) {
+            if (err) *err = "version " + version_id + " not found in manifest";
+            return false;
+        }
+        if (!http_download(url.c_str(), json_path)) {
+            if (err) *err = "cannot download version json " + version_id;
+            return false;
+        }
+    }
+    string text = read_file_text(json_path);
+    if (text.empty()) {
+        if (err) *err = "empty version json " + version_id;
+        return false;
+    }
+    VersionMeta child;
+    if (!parse_version_json(text, &child, err)) return false;
+    child.id = version_id;
+    if (!child.client_url.empty() && child.client_owner.empty()) child.client_owner = version_id;
+
+    // 2. наследование
+    int guard = 0;
+    std::string cur = version_id;
+    while (!child.inherits_from.empty()) {
+        if (++guard > 16 || child.inherits_from == cur) {
+            if (err) *err = "inheritsFrom loop for " + version_id;
+            return false;
+        }
+        cur = child.inherits_from;
+        string pjson = path_join(path_join(versions_dir, cur), cur + ".json");
+        if (!file_exists(pjson)) {
+            std::vector<ManifestVersion> list;
+            if (!fetch_manifest(list)) {
+                if (err) *err = "cannot load manifest for parent " + cur;
+                return false;
+            }
+            string url;
+            for (auto& v : list) if (v.id == cur) { url = v.url; break; }
+            if (url.empty()) {
+                if (err) *err = "parent version " + cur + " not found in manifest";
+                return false;
+            }
+            mkdirs(path_join(versions_dir, cur));
+            if (!http_download(url.c_str(), pjson)) {
+                if (err) *err = "cannot download parent version json " + cur;
+                return false;
+            }
+        }
+        string ptext = read_file_text(pjson);
+        if (ptext.empty()) {
+            if (err) *err = "empty parent version json " + cur;
+            return false;
+        }
+        VersionMeta par;
+        if (!parse_version_json(ptext, &par, err)) return false;
+        par.id = cur;
+        if (!par.client_url.empty() && par.client_owner.empty()) par.client_owner = cur;
+        child = merge_inherited(child, par);
+        child.inherits_from.clear(); // предок слит — прерываем цепочку
+    }
+
+    if (out) *out = child;
+    return true;
+}
+
+std::string find_client_jar_in_chain(const std::string& version_id, const std::string& mc_dir) {
+    string v = version_id;
+    std::set<std::string> seen;
+    while (!v.empty() && seen.insert(v).second) {
+        string jar = path_join(path_join(path_join(mc_dir, "versions"), v), v + ".jar");
+        if (file_exists(jar)) return jar;
+        string jpath = path_join(path_join(path_join(mc_dir, "versions"), v), v + ".json");
+        if (!file_exists(jpath)) return string();
+        string text = read_file_text(jpath);
+        if (text.empty()) return string();
+        using namespace sl::json;
+        Value root;
+        if (!parse(text, root)) return string();
+        const Value* x = root.get("inheritsFrom");
+        if (!x || !x->is_str()) return string();
+        v = x->as_string();
+    }
+    return string();
 }
 
 } // namespace sl

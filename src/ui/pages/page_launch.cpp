@@ -172,8 +172,9 @@ static bool on_cmd(Page* p, int id, HWND src) {
             std::string title = sl_combo_sel(d->profile_combo);
             for (auto& pr : d->profiles) if (pr.first == title) { profile_json = pr.second; break; }
             std::string loader = sl_combo_sel(d->loader_combo);
+            std::string loader_version; // полный выбор версии загрузчика не реализован — берём новейшую
             // запуск в потоке
-            sl_thread([p, d, ver, username, mcdir, profile_json]() {
+            sl_thread([p, d, ver, username, mcdir, profile_json, loader, loader_version]() {
                 if (!profile_json.empty()) {
                     install_profile_mods(profile_json, mcdir, [p](const std::string& s) {
                         PageEvent* e = new PageEvent; e->kind = PE_STATUS; e->page = p->hwnd; e->a = s;
@@ -184,7 +185,7 @@ static bool on_cmd(Page* p, int id, HWND src) {
                 e->kind = PE_DONE; e->page = p->hwnd; e->n = 100;
                 post_event(p->app->hwnd, e);
             });
-            ui_start_launch(p->app, ver, mcdir);
+            ui_start_launch(p->app, ver, mcdir, loader, loader_version);
             return true;
         }
         case ID_L_PROFILE:

@@ -90,7 +90,8 @@ std::string fmt_number(long long n);
 
 // Запуск Minecraft (из ui.cpp).
 void ui_start_launch(LauncherApp* app, const std::string& version_id,
-                     const std::string& mc_dir);
+                     const std::string& mc_dir, const std::string& loader = "Vanilla",
+                     const std::string& loader_version = "");
 
 // Статусы (совместимость: идут на Minecraft-страницу).
 void pages_on_status(LauncherApp* app, const std::string& s);

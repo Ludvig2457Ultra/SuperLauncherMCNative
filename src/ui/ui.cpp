@@ -8,6 +8,7 @@
 #include "../minecraft/version.h"
 #include "../minecraft/install.h"
 #include "../minecraft/command.h"
+#include "../minecraft/neoforge.h"
 #include "../instances/instances.h"
 #include <commctrl.h>
 #include <cstdio>
@@ -337,6 +338,8 @@ struct LaunchCtx {
     HWND hwnd;
     std::string version;
     std::string mc_dir;
+    std::string loader;         // "Vanilla" | "NeoForge" | ...
+    std::string loader_version;
     sl::LaunchOptions opts;
     bool from_instance = false;
     std::string instance_id;
@@ -389,7 +392,7 @@ DWORD WINAPI LaunchWorker(LPVOID param) {
     for (auto& v : g_versions)
         if (v.id == version) { manifest_url = v.url; break; }
 
-    post_status(h, "Проверка установки " + version + "...");
+post_status(h, "Проверка установки " + version + "...");
     std::string err;
     bool inst_ok = sl::install_minecraft_version(version, mc_dir, manifest_url, &prog, &err, false);
     if (!inst_ok) {
@@ -397,6 +400,21 @@ DWORD WINAPI LaunchWorker(LPVOID param) {
         post_status(h, "Ошибка установки: " + (err.empty() ? "неизвестная" : err));
         PostMessageW(h, WM_SL_DONE, (WPARAM)-2, 0);
         return 0;
+    }
+
+    // Загрузчик NeoForge: ставим клиент и запускаем версию neoforge-<ver>
+    if (ctx->loader == "NeoForge" && version.rfind("neoforge-", 0) != 0) {
+        post_status(h, "Установка NeoForge для " + version + "...");
+        std::string nf = sl::install_neoforge_client(version, mc_dir, opts.java_path, &prog, &err);
+        if (nf.empty()) {
+            post_status(h, "Ошибка NeoForge: " + (err.empty() ? "неизвестная" : err));
+            PostMessageW(h, WM_SL_DONE, (WPARAM)-5, 0);
+            return 0;
+        }
+        post_status(h, "NeoForge установлен: " + nf);
+        version = nf;
+    } else if (ctx->loader != "Vanilla" && ctx->loader != "NeoForge") {
+        post_status(h, "Загрузчик " + ctx->loader + " не реализован, запускаем Vanilla");
     }
 
     std::string cmd = sl::build_minecraft_command(version, mc_dir, opts, &err);
@@ -415,6 +433,7 @@ DWORD WINAPI LaunchWorker(LPVOID param) {
 }
 
 void start_launch(LauncherApp* app, const std::string& version, const std::string& mc_dir,
+                  const std::string& loader, const std::string& loader_version,
                   const sl::LaunchOptions& opts) {
     if (app->working) return;
     app->working = true;
@@ -422,6 +441,8 @@ void start_launch(LauncherApp* app, const std::string& version, const std::strin
     ctx->hwnd = app->hwnd;
     ctx->version = version;
     ctx->mc_dir = mc_dir;
+    ctx->loader = loader;
+    ctx->loader_version = loader_version;
     ctx->opts = opts;
     CreateThread(nullptr, 0, LaunchWorker, ctx, 0, nullptr);
 }
@@ -429,7 +450,8 @@ void start_launch(LauncherApp* app, const std::string& version, const std::strin
 } // namespace
 
 void ui_start_launch(LauncherApp* app, const std::string& version_id,
-                     const std::string& mc_dir) {
+                     const std::string& mc_dir, const std::string& loader,
+                     const std::string& loader_version) {
     sl::LaunchOptions opts;
     sl::Config cfg;
     cfg.load();
@@ -438,7 +460,7 @@ void ui_start_launch(LauncherApp* app, const std::string& version_id,
     opts.username = cfg.last_username.empty() ? "player" : cfg.last_username;
     if (!cfg.jvm_args.empty())
         opts.extra_jvm.push_back(cfg.jvm_args);
-    start_launch(app, version_id, mc_dir, opts);
+    start_launch(app, version_id, mc_dir, loader, loader_version, opts);
 }
 
 DWORD WINAPI ManifestWorker(LPVOID param) {
