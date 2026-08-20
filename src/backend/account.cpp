@@ -13,7 +13,7 @@ namespace account {
 using namespace sl::json;
 
 static std::string pick(const std::string& rel) {
-    std::string root = app_root_utf8();
+    const std::string root = app_root_utf8();
     std::string a = path_join(root, rel);
     if (file_exists(a)) return a;
     if (file_exists(rel)) return rel;
@@ -24,8 +24,8 @@ static std::string accounts_file() { return pick("accounts.json"); }
 static std::string licenses_file() { return pick("licenses.json"); }
 
 static std::string now_iso() {
-    time_t t = time(nullptr);
-    struct tm tm_;
+    const time_t t = time(nullptr);
+    tm tm_;
     localtime_s(&tm_, &t);
     char buf[40];
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm_);
@@ -44,45 +44,61 @@ static std::string hex_token(size_t n) {
 static Value user_to_json(const User& u) {
     Value v(Type::Object);
     v.obj = new std::vector<std::pair<std::string, Value>>();
+
     auto put = [&](const char* k, const std::string& s) {
         Value nv(Type::String); nv.str = s; v.obj->push_back({ k, std::move(nv) });
     };
-    auto puti = [&](const char* k, long long x) {
-        Value nv(Type::Number); nv.num = (double)x; v.obj->push_back({ k, std::move(nv) });
+
+    auto puti = [&](const char* k, const long long x) {
+        Value nv(Type::Number); nv.num = static_cast<double>(x); v.obj->push_back({ k, std::move(nv) });
     };
+
     put("user_id", u.user_id); put("username", u.username); put("email", u.email);
     put("password_hash", u.password_hash);
     put("license_tier", u.license_tier); puti("level", u.level); puti("xp", u.xp);
     put("created_at", u.created_at); put("last_login", u.last_login);
+
     Value skins_arr(Type::Array); skins_arr.arr = new std::vector<Value>();
-    for (auto& s : u.skins) { Value sv(Type::String); sv.str = s; skins_arr.arr->push_back(std::move(sv)); }
+    for (auto& s : u.skins) {
+        Value sv(Type::String); sv.str = s; skins_arr.arr->push_back(std::move(sv));
+    }
+
     Value cust_arr(Type::Array); cust_arr.arr = new std::vector<Value>();
-    for (auto& s : u.custom_skins) { Value sv(Type::String); sv.str = s; cust_arr.arr->push_back(std::move(sv)); }
+    for (auto& s : u.custom_skins) {
+        Value sv(Type::String); sv.str = s; cust_arr.arr->push_back(std::move(sv));
+    }
+
     v.obj->push_back({ "skins", std::move(skins_arr) });
     v.obj->push_back({ "custom_skins", std::move(cust_arr) });
+
     return v;
 }
 
 static User user_from_json(const Value& v) {
     User u;
+
     auto gs = [&](const char* k, std::string& out) {
         const Value* x = v.get(k);
         if (x && x->is_str()) out = x->as_string();
     };
+
     auto gi = [&](const char* k, long long& out) {
         const Value* x = v.get(k);
         if (x && x->is_num()) out = x->as_long();
     };
+
     gs("user_id", u.user_id); gs("username", u.username); gs("email", u.email);
     gs("password_hash", u.password_hash);
     gs("license_tier", u.license_tier); gi("level", (long long&)u.level); gi("xp", u.xp);
     gs("created_at", u.created_at); gs("last_login", u.last_login);
+
     if (const Value* x = v.get("skins"); x && x->is_arr())
         for (size_t i = 0; i < x->size(); i++)
             if (x->at(i).is_str()) u.skins.push_back(x->at(i).as_string());
     if (const Value* x = v.get("custom_skins"); x && x->is_arr())
         for (size_t i = 0; i < x->size(); i++)
             if (x->at(i).is_str()) u.custom_skins.push_back(x->at(i).as_string());
+
     return u;
 }
 
@@ -107,9 +123,9 @@ void save_users(const std::vector<User>& users) {
 
 std::vector<std::pair<std::string, License>> load_licenses() {
     std::vector<std::pair<std::string, License>> out;
-    std::string path = licenses_file();
+    const std::string path = licenses_file();
     if (!file_exists(path)) return out;
-    std::string text = read_file_text(path);
+    const std::string text = read_file_text(path);
     if (text.empty()) return out;
     Value root;
     if (!parse(text, root) || !root.is_obj()) return out;
@@ -141,16 +157,15 @@ void save_licenses(const std::vector<std::pair<std::string, License>>& licenses)
 }
 
 // ---------------- текущий пользователь ----------------
-static User* g_current = nullptr;
-User* current() { return g_current; }
-void set_current(User* u) {
-    if (g_current) delete g_current;
-    g_current = u;
+static std::unique_ptr<User> g_current = nullptr;
+User* current() { return g_current.get(); }
+void set_current(std::unique_ptr<User> u) {
+    g_current = std::move(u);
 }
 void logout() { set_current(nullptr); }
 
 void ensure_user_dir(const std::string& user_id) {
-    std::string dir = path_join(path_join(app_root_utf8(), "user_data"), user_id);
+    const std::string dir = path_join(path_join(app_root_utf8(), "user_data"), user_id);
     mkdirs(dir);
 }
 
@@ -178,7 +193,7 @@ bool register_user(const std::string& username, const std::string& email,
     save_users(users);
     ensure_user_dir(u.user_id);
     out = u;
-    set_current(new User(u));
+    set_current(std::make_unique<User>(User(u)));
     return true;
 }
 
@@ -186,21 +201,21 @@ bool login_user(const std::string& username_or_email, const std::string& passwor
                 User& out, std::string& err) {
     auto users = load_users();
     for (auto& u : users) {
-        bool name_match = (u.username == username_or_email);
-        bool email_match = !u.email.empty() && u.email == username_or_email;
+        const bool name_match = (u.username == username_or_email);
+        const bool email_match = !u.email.empty() && u.email == username_or_email;
         if (name_match || email_match) {
             // проверка пароля: hash:salt
-            size_t colon = u.password_hash.rfind(':');
+            const size_t colon = u.password_hash.rfind(':');
             if (colon == std::string::npos) { err = "Неверный логин или пароль"; return false; }
-            std::string stored = u.password_hash.substr(0, colon);
-            std::string salt = u.password_hash.substr(colon + 1);
+            const std::string stored = u.password_hash.substr(0, colon);
+            const std::string salt = u.password_hash.substr(colon + 1);
             if (sha256_hex(password + salt) != stored) {
                 err = "Неверный логин или пароль";
                 return false;
             }
             out = u;
             out.last_login = now_iso();
-            set_current(new User(out));
+            set_current(std::make_unique<User>(User(out)));
             for (auto& u2 : users) {
                 if (u2.user_id == u.user_id) { u2.last_login = out.last_login; break; }
             }
@@ -256,11 +271,35 @@ const std::vector<SkinInfo>& library() {
     return lib;
 }
 
+static std::string normalize_skin_id(const std::string& id) {
+    std::string result = id;
+
+    const size_t start = result.find_first_not_of(" \t\n\r");
+    const size_t end = result.find_last_not_of(" \t\n\r");
+    result = (start == std::string::npos) ? "" : result.substr(start, end - start + 1);
+
+    std::transform(result.begin(), result.end(), result.begin(),
+                   [](const unsigned char c){ return std::tolower(c); });
+
+    return result;
+}
+
 bool is_unlocked(const std::string& skin_id, const User& user) {
-    if (skin_id == "default") return true;
-    for (auto& s : user.skins) if (s == skin_id) return true;
-    for (auto& s : user.custom_skins) if (s == skin_id) return true;
-    return false;
+    const std::string normalized = normalize_skin_id(skin_id);
+    if (normalized == "default") return true;
+
+    std::vector<std::string> normalized_skins;
+    normalized_skins.reserve(user.skins.size() + user.custom_skins.size());
+
+    for (const auto& s : user.skins) {
+        normalized_skins.push_back(normalize_skin_id(s));
+    }
+    for (const auto& s : user.custom_skins) {
+        normalized_skins.push_back(normalize_skin_id(s));
+    }
+
+    return std::find(normalized_skins.begin(), normalized_skins.end(), normalized)
+           != normalized_skins.end();
 }
 
 bool unlock(const std::string& skin_id, User& user, std::string& msg) {
@@ -286,22 +325,32 @@ bool upload_custom(const std::string& image_path, User& user, std::string& out_i
     if (!file_exists(image_path)) { msg = "Файл не найден"; return false; }
     // проверка размера PNG 64x64 / 64x32 — читаем только если это PNG
     std::string bytes = read_file_text(image_path);
-    if (bytes.size() >= 24 && (unsigned char)bytes[0] == 0x89 &&
-        bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G') {
-        unsigned w = ((unsigned char)bytes[16] << 24) | ((unsigned char)bytes[17] << 16) |
-                     ((unsigned char)bytes[18] << 8) | ((unsigned char)bytes[19]);
-        unsigned h = ((unsigned char)bytes[20] << 24) | ((unsigned char)bytes[21] << 16) |
-                     ((unsigned char)bytes[22] << 8) | ((unsigned char)bytes[23]);
+    if (bytes.size() >= 24 &&
+        static_cast<unsigned char>(bytes[0]) == 0x89 &&
+        bytes[1] == 'P' &&
+        bytes[2] == 'N' &&
+        bytes[3] == 'G') {
+
+        auto read_be_u32 = [&](const size_t offset) -> uint32_t {
+            return (static_cast<uint32_t>(bytes[offset]) << 24) |
+                   (static_cast<uint32_t>(bytes[offset + 1]) << 16) |
+                   (static_cast<uint32_t>(bytes[offset + 2]) << 8) |
+                   static_cast<uint32_t>(bytes[offset + 3]);
+        };
+
+        const uint32_t w = read_be_u32(16);
+        const uint32_t h = read_be_u32(20);
+
         if (!((w == 64 && h == 64) || (w == 64 && h == 32))) {
             msg = "Размер должен быть 64x64 или 64x32";
             return false;
         }
     }
-    std::string id = "custom_" + account::hex_token(6);
-    std::string dir = path_join(path_join(app_root_utf8(),
+    const std::string id = "custom_" + account::hex_token(6);
+    const std::string dir = path_join(path_join(app_root_utf8(),
         path_join("user_data", user.user_id)), "skins");
     mkdirs(dir);
-    std::string dst = path_join(dir, id + ".png");
+    const std::string dst = path_join(dir, id + ".png");
     if (!copy_file(image_path, dst)) { msg = "Ошибка копирования"; return false; }
     user.custom_skins.push_back(id);
     auto users = account::load_users();

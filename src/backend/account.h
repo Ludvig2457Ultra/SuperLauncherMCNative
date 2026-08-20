@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -31,7 +32,7 @@ namespace account {
 
 // Текущий пользователь (nullptr если не вошёл).
 User* current();
-void set_current(User* u) ; // принимает владение; удаляет старый
+void set_current(std::unique_ptr<User> u) ; // принимает владение; удаляет старый
 
 // Загрузка/сохранение accounts.json
 std::vector<User> load_users();
