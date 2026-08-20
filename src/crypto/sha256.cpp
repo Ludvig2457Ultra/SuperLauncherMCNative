@@ -82,4 +82,68 @@ std::string sha256_hex(const void* data, size_t len) {
     return std::string(out, 64);
 }
 
+// ---------------------------------------------------------------- sha256_file
+
+namespace {
+
+struct ShaCtx {
+    uint32_t s[8];
+    uint64_t len = 0;
+    unsigned char buf[64];
+    size_t bl = 0;
+};
+
+void sc_init(ShaCtx& c) {
+    c.s[0] = 0x6a09e667; c.s[1] = 0xbb67ae85; c.s[2] = 0x3c6ef372; c.s[3] = 0xa54ff53a;
+    c.s[4] = 0x510e527f; c.s[5] = 0x9b05688c; c.s[6] = 0x1f83d9ab; c.s[7] = 0x5be0cd19;
+    c.len = 0; c.bl = 0;
+}
+
+void sc_update(ShaCtx& c, const unsigned char* p, size_t n) {
+    c.len += n;
+    if (c.bl) {
+        size_t need = 64 - c.bl;
+        if (n < need) { memcpy(c.buf + c.bl, p, n); c.bl += n; return; }
+        memcpy(c.buf + c.bl, p, need);
+        sha256_process(c.s, c.buf);
+        c.bl = 0; p += need; n -= need;
+    }
+    while (n >= 64) { sha256_process(c.s, p); p += 64; n -= 64; }
+    if (n) { memcpy(c.buf, p, n); c.bl = n; }
+}
+
+std::string sc_fin(ShaCtx& c) {
+    unsigned char tail[128];
+    size_t l = c.bl;
+    memcpy(tail, c.buf, l);
+    tail[l] = 0x80;
+    size_t tlen = l + 1;
+    if (tlen > 56) {
+        memset(tail + tlen, 0, 128 - tlen);
+        sha256_process(c.s, tail);
+        tlen = 0;
+    }
+    memset(tail + tlen, 0, 64 - tlen);
+    uint64_t bits = c.len * 8;
+    for (int i = 0; i < 8; i++) tail[56 + i] = (unsigned char)(bits >> (56 - i * 8));
+    sha256_process(c.s, tail);
+    char out[65];
+    for (int i = 0; i < 8; i++) sprintf_s(out + i * 8, 9, "%08x", c.s[i]);
+    return std::string(out, 64);
+}
+
+} // namespace
+
+std::string sha256_file(const std::string& path) {
+    FILE* f = nullptr;
+    if (fopen_s(&f, path.c_str(), "rb") != 0 || !f) return std::string();
+    ShaCtx c;
+    sc_init(c);
+    unsigned char buf[1 << 20];
+    size_t rd;
+    while ((rd = fread(buf, 1, sizeof(buf), f)) > 0) sc_update(c, buf, rd);
+    fclose(f);
+    return sc_fin(c);
+}
+
 } // namespace sl

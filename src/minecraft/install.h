@@ -36,7 +36,11 @@ bool restore_from_gradle_cache(const std::string& rel_path, const std::string& s
 
 // Проверить SHA-1 файла (с фиксом "wrong Checksum get da39a3ee..."). Возвращает
 // true, если файл существует и (если ожидаемый sha1 не пуст) совпадает.
-bool verify_file_sha1(const std::string& path, const std::string& expected_sha1);
+// При protect_sha256=true дополнительно сверяется локальный SHA-256 sidecar
+// (<path>.sha256): если он есть и отличается — файл считается повреждённым
+// (возможна коллизия SHA-1), чего нет — sidecar создаётся.
+bool verify_file_sha1(const std::string& path, const std::string& expected_sha1,
+                      bool protect_sha256 = false);
 
 // Список уже установленных версий (каталоги versions/*).
 std::vector<std::string> list_installed_versions(const std::string& mc_dir);

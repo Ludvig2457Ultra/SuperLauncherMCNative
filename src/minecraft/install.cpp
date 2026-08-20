@@ -5,6 +5,7 @@
 #include "../core/log.h"
 #include "../core/config.h"
 #include "../crypto/sha1file.h"
+#include "../crypto/sha256.h"
 #include "../net/http.h"
 #include <shlobj.h>
 #include <cstdlib>
@@ -29,7 +30,26 @@ static void notify(InstallProgress* p, const std::string& s, float d, float t) {
     if (p && p->update) p->update(s, d, t);
 }
 
-bool verify_file_sha1(const string& path, const string& expected_sha1) {
+// sidecar со SHA-256 "хорошего" содержимого файла, записанный при первом
+// успешном скачивании (когда SHA-1 подтверждён официальным манифестом).
+static string sha256_sidecar_path(const string& path) { return path + ".sha256"; }
+
+// Записать/обновить sidecar по фактическому (уже проверенному) содержимому.
+static void sha256_record_force(const string& path) {
+    string h = sha256_file(path);
+    if (h.empty()) return;
+    write_file_text(sha256_sidecar_path(path), h);
+}
+
+// Есть ли записанный sidecar, отличный от текущего содержимого файла.
+static bool sha256_sidecar_conflicted(const string& path) {
+    string sp = sha256_sidecar_path(path);
+    if (!file_exists(sp)) return false;
+    string cur = sha256_file(path);
+    return !cur.empty() && read_file_text(sp) != cur;
+}
+
+bool verify_file_sha1(const string& path, const string& expected_sha1, bool protect_sha256) {
     if (!file_exists(path)) return false;
     if (file_size(path) == 0) return false; // 0-байтные jar — битые
     if (expected_sha1.empty()) return true;
@@ -39,6 +59,19 @@ bool verify_file_sha1(const string& path, const string& expected_sha1) {
         log_warn("verify_file_sha1: mismatch " + path);
         log_warn("  got  " + h);
         log_warn("  want " + expected_sha1);
+        return false;
+    }
+    if (protect_sha256) {
+        string sp = sha256_sidecar_path(path);
+        if (!file_exists(sp)) {
+            sha256_record_force(path); // первый раз — запоминаем доверенный SHA-256
+        } else if (sha256_sidecar_conflicted(path)) {
+            // SHA-1 совпал с манифестом, но содержимое изменилось против
+            // запомненного — это ровно тот случай коллизии SHA-1, от которого
+            // sidecar защищает. Просим перекачать.
+            log_warn("verify_file_sha1: sha256 sidecar MISMATCH (possible SHA-1 collision/tamper): " + path);
+            return false;
+        }
     }
     return ok;
 }
@@ -86,7 +119,7 @@ bool ensure_library_file(const string& mc_dir, const string& rel_path,
                          const string& url, const string& sha1,
                          long long size, InstallProgress* progress, bool verify_only) {
     string target = path_join(mc_dir, "libraries/" + rel_path);
-    if (verify_file_sha1(target, sha1)) return true;
+    if (verify_file_sha1(target, sha1, true)) return true;
     // повреждён/отсутствует — пробуем из gradle-кэша
     if (!sha1.empty() && restore_from_gradle_cache(rel_path, sha1, target)) return true;
     if (verify_only) return false;
@@ -95,11 +128,15 @@ bool ensure_library_file(const string& mc_dir, const string& rel_path,
     notify(progress, "Скачивание " + file_name(rel_path), 0, 0);
     bool ok = http_download(url.c_str(), target, nullptr, nullptr, g_net_cfg);
     if (!ok) return false;
-    if (!verify_file_sha1(target, sha1)) {
+    // обновляем sidecar сразу после успеха по манифесту (проверка ниже)
+    sha256_record_force(target);
+    if (!verify_file_sha1(target, sha1, true)) {
         // повторная попытка
         remove_file(target);
         ok = http_download(url.c_str(), target, nullptr, nullptr, g_net_cfg);
-        if (!ok || !verify_file_sha1(target, sha1)) return false;
+        if (!ok) return false;
+        sha256_record_force(target);
+        if (!verify_file_sha1(target, sha1, true)) return false;
     }
     return true;
 }
@@ -129,13 +166,14 @@ bool install_minecraft_version(const string& version_id, const string& mc_dir,
     if (!m.client_url.empty()) {
         string owner = m.client_owner.empty() ? version_id : m.client_owner;
         string jp = path_join(path_join(path_join(mc_dir, "versions"), owner), owner + ".jar");
-        if (!verify_file_sha1(jp, m.client_sha1)) {
+        if (!verify_file_sha1(jp, m.client_sha1, true)) {
             if (verify_only) { if (err) *err = "client jar missing"; return false; }
             mkdirs(parent_dir(jp));
             notify(progress, "Скачивание " + owner + ".jar", 0, 0);
             bool ok = http_download(m.client_url.c_str(), jp, nullptr, nullptr, g_net_cfg);
             if (!ok) { if (err) *err = "client jar download failed"; return false; }
-            if (!m.client_sha1.empty() && !verify_file_sha1(jp, m.client_sha1)) {
+            sha256_record_force(jp);
+            if (!m.client_sha1.empty() && !verify_file_sha1(jp, m.client_sha1, true)) {
                 if (err) *err = "client jar sha1 mismatch";
                 return false;
             }
@@ -173,7 +211,7 @@ bool install_minecraft_version(const string& version_id, const string& mc_dir,
                     string h = o.get("hash") ? o.get("hash")->as_string() : string();
                     if (h.empty()) continue;
                     string p = path_join("assets/objects/" + h.substr(0, 2), h);
-                    if (verify_file_sha1(path_join(mc_dir, p), h)) continue;
+                    if (verify_file_sha1(path_join(mc_dir, p), h, true)) continue;
                     missing.emplace_back(h, p);
                 }
                 if (!missing.empty() && !verify_only) {
@@ -186,6 +224,7 @@ bool install_minecraft_version(const string& version_id, const string& mc_dir,
                             // пропускаем (обновляется при следующем запуске)
                             log_warn("asset download failed: " + mm.first);
                         } else {
+                            sha256_record_force(full);
                             done++;
                         }
                     }
