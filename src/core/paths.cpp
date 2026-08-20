@@ -1,17 +1,34 @@
 #include "paths.h"
 #include "common.h"
+#ifdef _WIN32
 #include "win.h"
 #include <shlobj.h>
 #include <shlwapi.h>
+#endif
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include "../platform/plat.h"
+#if defined(__linux__)
+#include <sys/sysinfo.h>
+#endif
 
 namespace sl {
 
 using std::string;
 using std::wstring;
 
+// Простой ascii/utf8-перенос строки в wide (для не-Windows, где файловые пути
+// из $HOME почти всегда ASCII; полноценный UTF-8 на Unix — за рамками WIP).
+static wstring utf8_to_wide(const string& s) {
+    wstring o;
+    for (unsigned char c : s) o.push_back((wchar_t)c);
+    return o;
+}
+
 std::wstring appdata_path() {
+#ifdef _WIN32
     static wstring cached;
     if (!cached.empty()) return cached;
     wchar_t buf[MAX_PATH] = {0};
@@ -19,13 +36,26 @@ std::wstring appdata_path() {
         cached = buf;
     }
     return cached;
+#else
+    static wstring cached;
+    if (!cached.empty()) return cached;
+    const char* h = getenv("HOME");
+    cached = utf8_to_wide(h ? h : ".");
+    if (!cached.empty() && cached.back() != L'/') cached += L"/";
+    cached += L".local/share";
+    return cached;
+#endif
 }
 
 std::wstring app_root() {
     static wstring cached;
     if (!cached.empty()) return cached;
     cached = appdata_path();
+#ifdef _WIN32
     if (!cached.empty()) cached += L"\\SuperLauncher";
+#else
+    if (!cached.empty()) cached += L"/SuperLauncher";
+#endif
     return cached;
 }
 
@@ -34,8 +64,13 @@ string app_root_utf8() { return w2a(app_root()); }
 string minecraft_directory() {
     static string cached;
     if (!cached.empty()) return cached;
+#ifdef _WIN32
     wstring base = appdata_path();
     cached = w2a(base + L"\\.minecraft");
+#else
+    const char* h = getenv("HOME");
+    cached = string(h ? h : ".") + "/.minecraft";
+#endif
     return cached;
 }
 
@@ -46,14 +81,21 @@ string settings_file() { return "settings.json"; }
 
 bool file_exists(const string& path) {
     if (path.empty()) return false;
+#ifdef _WIN32
     DWORD a = GetFileAttributesA(path.c_str());
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    std::error_code ec;
+    return std::filesystem::is_regular_file(path, ec);
+#endif
 }
+#ifdef _WIN32
 bool file_exists_w(const wstring& path) {
     if (path.empty()) return false;
     DWORD a = GetFileAttributesW(path.c_str());
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
+#endif
 
 string read_file_text(const string& path) {
     FILE* f = fopen(path.c_str(), "rb");
@@ -81,28 +123,54 @@ bool write_file_text(const string& path, const string& text) {
 
 bool mkdirs(const string& path) {
     if (path.empty()) return false;
+#ifdef _WIN32
     std::wstring w = a2w(path);
     return SUCCEEDED(SHCreateDirectoryExW(nullptr, w.c_str(), nullptr)) ||
            GetLastError() == ERROR_ALREADY_EXISTS ||
            (GetFileAttributesW(w.c_str()) & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
+    return !ec || std::filesystem::is_directory(path, ec);
+#endif
 }
+#ifdef _WIN32
 bool mkdirs_w(const wstring& path) {
     if (path.empty()) return false;
     return SUCCEEDED(SHCreateDirectoryExW(nullptr, path.c_str(), nullptr)) ||
            GetLastError() == ERROR_ALREADY_EXISTS ||
            (GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
+#endif
 
 bool copy_file(const string& src, const string& dst) {
+#ifdef _WIN32
     return CopyFileA(src.c_str(), dst.c_str(), FALSE) != 0;
+#else
+    std::error_code ec;
+    std::filesystem::copy_file(src, dst, std::filesystem::copy_options::overwrite_existing, ec);
+    return !ec;
+#endif
 }
 bool remove_file(const string& path) {
+#ifdef _WIN32
     return DeleteFileA(path.c_str()) != 0;
+#else
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return !ec;
+#endif
 }
 long long file_size(const string& path) {
+#ifdef _WIN32
     WIN32_FILE_ATTRIBUTE_DATA d;
     if (!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &d)) return -1;
     return ((long long)d.nFileSizeHigh << 32) | d.nFileSizeLow;
+#else
+    std::error_code ec;
+    auto n = std::filesystem::file_size(path, ec);
+    return ec ? -1 : (long long)n;
+#endif
 }
 
 string path_join(const string& a, const string& b) {
@@ -143,6 +211,7 @@ static int java_major_from_exe(const string& java_exe) {
 }
 
 static void collect_java_candidates(std::vector<std::pair<string, int>>& out) {
+#ifdef _WIN32
     char pf[MAX_PATH] = {0}, pfx86[MAX_PATH] = {0};
     DWORD n1 = GetEnvironmentVariableA("ProgramFiles", pf, MAX_PATH);
     DWORD n2 = GetEnvironmentVariableA("ProgramFiles(x86)", pfx86, MAX_PATH);
@@ -192,6 +261,38 @@ static void collect_java_candidates(std::vector<std::pair<string, int>>& out) {
             tok = strtok(nullptr, ";");
         }
     }
+#else
+    // Unix: типовые места установки JDK + PATH
+    std::vector<string> roots;
+    const char* h = getenv("HOME");
+    if (h) {
+        roots.push_back(string(h) + "/.sdkman/candidates/java");
+        roots.push_back(string(h) + "/.jdks");
+    }
+    roots.push_back("/usr/lib/jvm");
+    roots.push_back("/opt/java");
+    for (auto& base : roots) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(base, ec)) continue;
+        for (auto& n : list_directory(base)) {
+            string full = base + "/" + n + "/bin/java";
+            if (file_exists(full)) out.push_back({ full, java_major_from_exe(full) });
+        }
+    }
+    const char* pathvar = getenv("PATH");
+    if (pathvar) {
+        string p = pathvar;
+        size_t start = 0;
+        while (start < p.size()) {
+            size_t colon = p.find(':', start);
+            string dir = colon == string::npos ? p.substr(start) : p.substr(start, colon - start);
+            string cand = dir + "/java";
+            if (file_exists(cand)) { out.push_back({ cand, java_major_from_exe(cand) }); break; }
+            if (colon == string::npos) break;
+            start = colon + 1;
+        }
+    }
+#endif
 }
 
 static string pick_java(int required_major, bool prefer_oldest) {
@@ -228,6 +329,22 @@ string find_java_path() {
 
 string find_java_path_for(int required_major) {
     return pick_java(required_major, true);
+}
+
+long long system_total_ram_mb() {
+#ifdef _WIN32
+    MEMORYSTATUSEX ms = {0};
+    ms.dwLength = sizeof(ms);
+    if (!GlobalMemoryStatusEx(&ms)) return 0;
+    return (long long)(ms.ullTotalPhys / (1024 * 1024));
+#elif defined(__linux__)
+    struct sysinfo si;
+    if (sysinfo(&si) != 0) return 0;
+    long long total = (long long)si.totalram * si.mem_unit;
+    return total / (1024 * 1024);
+#else
+    return 0;
+#endif
 }
 
 } // namespace sl

@@ -7,7 +7,10 @@
 #include "../crypto/sha1file.h"
 #include "../crypto/sha256.h"
 #include "../net/http.h"
+#include "../platform/plat.h"
+#ifdef _WIN32
 #include <shlobj.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
@@ -98,9 +101,9 @@ bool restore_from_gradle_cache(const string& rel_path, const string& sha1, const
     string version = parts[parts.size() - 2];
     string filename = parts[parts.size() - 1];
 
-    char home[MAX_PATH] = {0};
-    if (!GetEnvironmentVariableA("USERPROFILE", home, MAX_PATH)) return false;
-    string gradle_home = string(home) + "/.gradle";
+    string home = env_user_home();
+    if (home.empty()) return false;
+    string gradle_home = home + "/.gradle";
     for (const char* base : { "caches/modules-2/files-2.1", "caches/modules-2/files-2.0" }) {
         string cache_dir = path_join(path_join(gradle_home, base), path_join(group, path_join(version, sha1)));
         string src = path_join(cache_dir, filename);
@@ -275,22 +278,10 @@ std::vector<string> list_installed_versions(const string& mc_dir) {
     std::vector<string> out;
     string vdir = path_join(mc_dir, "versions");
     if (!file_exists(vdir)) return out;
-    const char* os_dir = getenv("PATH"); (void)os_dir;
-    // Перебор каталогов
-    // (используем FindFirstFile вместо std::filesystem для стабильности)
-    string pattern = vdir + "/*";
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-    if (h != INVALID_HANDLE_VALUE) {
-        do {
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                if (strcmp(fd.cFileName, ".") != 0 && strcmp(fd.cFileName, "..") != 0)
-                    out.push_back(fd.cFileName);
-            }
-        } while (FindNextFileA(h, &fd));
-        FindClose(h);
+    // Список каталогов versions/* (кроссплатформенно).
+    for (auto& n : list_directory(vdir)) {
+        if (file_exists(path_join(vdir, n))) out.push_back(n);
     }
-    std::sort(out.begin(), out.end());
     return out;
 }
 

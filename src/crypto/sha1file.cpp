@@ -30,7 +30,11 @@ std::string sha1_file(const std::string& path) {
     // файлы до ~40 МБ; допустимо).
     // TODO: потоковый hasher на ассемблере для больших файлов.
     fseek(f, 0, SEEK_END);
+#ifdef _WIN32
     long long n = _ftelli64(f);
+#else
+    long long n = (long long)ftell(f);
+#endif
     fseek(f, 0, SEEK_SET);
     std::string result;
     if (n > 0) {

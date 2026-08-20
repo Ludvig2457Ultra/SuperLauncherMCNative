@@ -5,6 +5,7 @@
 #include "../core/log.h"
 #include "../core/zip.h"
 #include "../core/win.h"
+#include "../platform/plat.h"
 
 namespace sl {
 
@@ -108,7 +109,10 @@ static void fill_vars(CommandCtx& c, const VersionMeta& m, const LaunchOptions& 
 
 // ---- шаг 4: выбрать java exe с учётом требуемой версии (javaVersion) ----
 static string pick_java(const VersionMeta& m, const LaunchOptions& opts) {
-    string java = opts.java_path.empty() ? find_java_path_for(m.java_major) : opts.java_path;
+    // Конфиг-путь, только если существует (иначе — авто-поиск).
+    string java;
+    if (!opts.java_path.empty() && file_exists(opts.java_path)) java = opts.java_path;
+    if (java.empty()) java = find_java_path_for(m.java_major);
     if (java.empty()) java = "java";
     return java;
 }
@@ -223,19 +227,38 @@ string build_minecraft_command(const string& version_id, const string& mc_dir,
     // --- сборка argv ---
     std::vector<string> cmd;
     cmd.push_back(java);
-    cmd.push_back("-Xmx" + std::to_string(opts.max_ram) + "M");
-    cmd.push_back("-Xms" + std::to_string(opts.min_ram) + "M");
+    // Ограничить ОЗУ физической памятью системы (минус запас), минимум 1 ГБ.
+    long long ram = opts.max_ram;
+    long long total = system_total_ram_mb();
+    if (total > 0 && ram > total - 1024) ram = total - 1024;
+    if (ram < 1024) ram = 1024;
+    long long minram = opts.min_ram;
+    if (minram <= 0) minram = 512;
+    if (minram > ram) minram = ram;
+    if (minram < 256) minram = 256;
+    cmd.push_back("-Xmx" + std::to_string(ram) + "M");
+    cmd.push_back("-Xms" + std::to_string(minram) + "M");
+    cmd.push_back("-Djava.net.preferIPv4Stack=true"); // localhost → 127.0.0.1, а не IPv6 ::1 (getsockopt Permission denied на локалке)
     for (auto& a : opts.extra_jvm) if (!a.empty()) cmd.push_back(a);
 
     add_jvm_args(cmd, m, c, c.natives_dir);                         // 5. jvm args
     if (m.main_class.empty()) { if (err) *err = "no mainClass"; return string(); }
     cmd.push_back(m.main_class);
     add_game_args(cmd, m, c);                                       // 6. game args
+    if (!opts.server_host.empty()) {                                // 6b. авто-подключение
+        cmd.push_back("--server");
+        cmd.push_back(opts.server_host);
+        if (opts.server_port > 0) {
+            cmd.push_back("--port");
+            cmd.push_back(std::to_string(opts.server_port));
+        }
+    }
 
     return join_argv(cmd);                                          // 7. командная строка
 }
 
 int launch_and_wait(const string& command_line, const string& workdir, string* err) {
+#ifdef _WIN32
     // строки c cmd.exe т.к. CreateProcessA требует exe
     string cmd = command_line;
     STARTUPINFOA si = {0};
@@ -254,6 +277,9 @@ int launch_and_wait(const string& command_line, const string& workdir, string* e
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return (int)code;
+#else
+    return run_command_and_wait(command_line, workdir, err);
+#endif
 }
 
 int launch_argv_and_wait(const std::vector<string>& argv, const string& workdir, string* err) {

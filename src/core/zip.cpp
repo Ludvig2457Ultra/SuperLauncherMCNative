@@ -2,7 +2,9 @@
 #include "inflate.h"
 #include "paths.h"
 #include "log.h"
+#ifdef _WIN32
 #include "win.h"
+#endif
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
@@ -31,7 +33,11 @@ int zip_extract_all(const string& zip_path, const string& dest_dir) {
     FILE* f = fopen(zip_path.c_str(), "rb");
     if (!f) return 0;
     fseek(f, 0, SEEK_END);
+#ifdef _WIN32
     long long fsize = _ftelli64(f);
+#else
+    long long fsize = (long long)ftell(f);
+#endif
     if (fsize <= 0 || fsize > 512LL * 1024 * 1024) { fclose(f); return 0; }
     fseek(f, 0, SEEK_SET);
     std::vector<unsigned char> buf((size_t)fsize);

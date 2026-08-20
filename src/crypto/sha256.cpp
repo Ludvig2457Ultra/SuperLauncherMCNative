@@ -77,7 +77,7 @@ std::string sha256_hex(const void* data, size_t len) {
 
     char out[65];
     for (int i = 0; i < 8; i++) {
-        sprintf_s(out + i * 8, 9, "%08x", state[i]);
+        snprintf(out + i * 8, 9, "%08x", state[i]);
     }
     return std::string(out, 64);
 }
@@ -128,7 +128,7 @@ std::string sc_fin(ShaCtx& c) {
     for (int i = 0; i < 8; i++) tail[56 + i] = (unsigned char)(bits >> (56 - i * 8));
     sha256_process(c.s, tail);
     char out[65];
-    for (int i = 0; i < 8; i++) sprintf_s(out + i * 8, 9, "%08x", c.s[i]);
+    for (int i = 0; i < 8; i++) snprintf(out + i * 8, 9, "%08x", c.s[i]);
     return std::string(out, 64);
 }
 

@@ -459,6 +459,7 @@ bool http_download(const char* url, const std::string& dst,
 // ------------------------------------------------------------------
 // Реализация на WinINet (используется в MSVC-сборке).
 // ------------------------------------------------------------------
+#if defined(_WIN32)
 #include <wininet.h>
 #include <cstdio>
 
@@ -602,5 +603,107 @@ bool http_download(const char* url, const std::string& dst,
 }
 
 } // namespace sl
+
+#else // !SL_USE_OPENSSL && !_WIN32 (Unix: Linux/macOS)
+// ------------------------------------------------------------------
+// Реализация на универсальном curl (есть в любой Linux/macOS по умолчанию).
+// Каждый запрос — отдельный процесс curl; результат GET читается из stdout,
+// файлы — через `curl -o`. Проверка целостности внешняя (sha1/sha256).
+// ------------------------------------------------------------------
+#include "../core/paths.h"
+#include "../core/log.h"
+#include <cstdio>
+#include <cstdlib>
+
+namespace sl {
+
+using std::string;
+
+static string sh_q(const string& s) {
+    string o = "'";
+    for (char c : s) {
+        if (c == '\'') o += "'\\''";
+        else o += c;
+    }
+    return o + "'";
+}
+
+static string proxy_args(const NetConfig& cfg) {
+    if (cfg.proxy_host.empty() || cfg.proxy_port <= 0) return string();
+    string u = cfg.proxy_host + ":" + std::to_string(cfg.proxy_port);
+    if (!cfg.proxy_user.empty()) u = cfg.proxy_user + ":" + cfg.proxy_pass + "@" + u;
+    return " --proxy " + sh_q("http://" + u);
+}
+
+static string header_args(const std::vector<HttpHead>& headers) {
+    string o;
+    for (auto& h : headers) o += " -H " + sh_q(h.name + ": " + h.value);
+    return o;
+}
+
+static int curl_run(const string& extra, string* captured) {
+    string cmd = "curl -sS -L --fail --max-time 60" + extra;
+    if (captured) {
+        FILE* f = popen(cmd.c_str(), "r");
+        if (!f) return -1;
+        char buf[16384];
+        size_t rd;
+        while ((rd = fread(buf, 1, sizeof(buf), f)) > 0) captured->append(buf, rd);
+        return pclose(f);
+    }
+    return std::system(cmd.c_str());
+}
+
+static string ua_arg(const NetConfig& cfg) {
+    return " -A " + sh_q(cfg.user_agent);
+}
+
+string http_request(const char* method, const char* url, const std::string& body,
+                    const std::vector<HttpHead>& headers, const NetConfig& cfg) {
+    string extra;
+    extra += ua_arg(cfg);
+    extra += " " + proxy_args(cfg);
+    extra += " " + header_args(headers);
+    if (!body.empty()) extra += " --data-binary " + sh_q(body);
+    extra += " -X " + string(method);
+    extra += " " + sh_q(url);
+    string cap;
+    curl_run(extra, &cap);
+    return cap;
+}
+
+string http_get(const char* url, const NetConfig& cfg) {
+    return http_request("GET", url, string(), {}, cfg);
+}
+
+string http_get_ex(const char* url, const std::vector<HttpHead>& headers,
+                   const NetConfig& cfg) {
+    return http_request("GET", url, string(), headers, cfg);
+}
+
+string http_post_json(const char* url, const std::string& body,
+                      const std::vector<HttpHead>& headers, const NetConfig& cfg) {
+    std::vector<HttpHead> h = headers;
+    h.push_back({"Content-Type", "application/json"});
+    return http_request("POST", url, body, h, cfg);
+}
+
+bool http_download(const char* url, const std::string& dst,
+                   std::function<void(long long, long long, void*)> progress,
+                   void* data, const NetConfig& cfg) {
+    (void)progress; (void)data;
+    if (!mkdirs(parent_dir(dst))) log_error("http_download: cannot create dir for " + dst);
+    string tmp = dst + ".part";
+    string extra = ua_arg(cfg) + " " + proxy_args(cfg) + " -o " + sh_q(tmp) + " " + sh_q(url);
+    if (curl_run(extra, nullptr) != 0) { remove_file(tmp); return false; }
+    remove_file(dst);
+    if (!copy_file(tmp, dst)) { remove_file(tmp); return false; }
+    remove_file(tmp);
+    return true;
+}
+
+} // namespace sl
+
+#endif // _WIN32
 
 #endif // SL_USE_OPENSSL

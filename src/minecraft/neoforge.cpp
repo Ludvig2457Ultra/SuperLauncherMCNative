@@ -5,7 +5,10 @@
 #include "../core/config.h"
 #include "../net/http.h"
 #include "../core/common.h"
+#include "../platform/plat.h"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include <vector>
 
 namespace sl {
@@ -76,6 +79,7 @@ string resolve_neoforge_version(const string& mc_version, const std::vector<stri
 
 // Запустить процесс (argv), ожидая до timeout_ms. Возвращает true при коде 0.
 static bool run_installer(const std::vector<string>& argv, string* err, DWORD timeout_ms) {
+#ifdef _WIN32
     std::wstring cmdline;
     for (size_t i = 0; i < argv.size(); i++) {
         std::wstring a = a2w(argv[i]);
@@ -114,6 +118,26 @@ static bool run_installer(const std::vector<string>& argv, string* err, DWORD ti
         return false;
     }
     return true;
+#else
+    // Unix: запускаем ту же командную строку через /bin/sh -c.
+    // Таймаут тут не применяется (нет универсального timeout в POSIX) —
+    // инсталлер NeoForge обычно работает быстро.
+    (void)timeout_ms;
+    string cmdline;
+    for (size_t i = 0; i < argv.size(); i++) {
+        string a = argv[i];
+        cmdline += "'";
+        for (char c : a) { if (c == '\'') cmdline += "'\\''"; else cmdline += c; }
+        cmdline += "'";
+        if (i + 1 < argv.size()) cmdline += " ";
+    }
+    int code = run_command_and_wait(cmdline, string(), err);
+    if (code != 0) {
+        if (err) *err = "инсталлер завершился с кодом " + std::to_string(code);
+        return false;
+    }
+    return true;
+#endif
 }
 
 string install_neoforge_client(const string& mc_version, const string& mc_dir,

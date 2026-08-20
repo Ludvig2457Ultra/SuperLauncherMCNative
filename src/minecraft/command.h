@@ -16,6 +16,8 @@ struct LaunchOptions {
     std::string launcher_name = "SuperLauncher";
     std::string launcher_version = "2.0";
     std::string version_type = "release";
+    std::string server_host;   // если не пусто — автоматическое подключение к серверу
+    int server_port = 0;       // используется вместе с server_host
 };
 
 // Собрать командную строку запуска (аналог get_minecraft_command).

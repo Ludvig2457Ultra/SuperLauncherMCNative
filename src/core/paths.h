@@ -27,6 +27,9 @@ std::string find_java_path();
 // самая новая. required_major <= 0 — самый младший из установленных.
 std::string find_java_path_for(int required_major);
 
+// Объём физической памяти системы в мегабайтах (0, если не удалось определить).
+long long system_total_ram_mb();
+
 // Работа с файлами
 bool file_exists(const std::string& path);
 bool file_exists_w(const std::wstring& path);
