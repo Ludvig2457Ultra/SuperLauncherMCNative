@@ -27,8 +27,8 @@ struct LoginDialogState {
 static LRESULT CALLBACK LoginProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     LoginDialogState* s = (LoginDialogState*)GetWindowLongPtrW(h, GWLP_USERDATA);
     switch (m) {
-        case WM_CLOSE:
-            EndDialog(h, IDCANCEL);
+        case WM_CLOSE | WM_DESTROY:
+            DestroyWindow(h);
             return 0;
         case WM_COMMAND: {
             int id = LOWORD(w);

@@ -1,4 +1,7 @@
 #include "ui.h"
+
+#include <atomic>
+
 #include "pages/pages.h"
 #include "../core/win.h"
 #include "../core/common.h"
@@ -43,6 +46,8 @@ static COLORREF t_grad2()        { return RGB(0x76, 0x4B, 0xA2); }
 static COLORREF t_muted() { return RGB(0x9A, 0x9A, 0xA4); }       // приглушённый
 static COLORREF t_faint() { return RGB(0x6E, 0x6E, 0x78); }       // едва заметный
 static COLORREF t_border() { return RGB(0x2A, 0x2A, 0x31); }      // разделители
+
+static std::atomic g_app_stopping{false};
 
 void ui_fill_gradient_v(HDC dc, RECT* r, COLORREF top, COLORREF bottom, int bands) {
     int h = r->bottom - r->top;
@@ -357,6 +362,15 @@ void post_progress(HWND h, long long done, long long total) {
 
 DWORD WINAPI LaunchWorker(LPVOID param) {
     std::unique_ptr<LaunchCtx> ctx((LaunchCtx*)param);
+
+    while (!g_app_stopping) {
+        if (g_app_stopping) {
+            post_status(ctx->hwnd, "Canceling operation");
+            PostMessageW(ctx->hwnd, WM_SL_DONE, static_cast<WPARAM>(-4), 0);
+            return 0;
+        }
+    }
+
     HWND h = ctx->hwnd;
     std::string version = ctx->version;
     std::string mc_dir = ctx->mc_dir;
@@ -467,8 +481,10 @@ DWORD WINAPI ManifestWorker(LPVOID param) {
     HWND h = (HWND)param;
     std::vector<sl::ManifestVersion> list;
     if (sl::fetch_manifest(list) && !list.empty()) {
-        g_versions = list;
-        PostMessageW(h, WM_SL_VERSIONS, 0, 0);
+        if (g_app_stopping) {
+            g_versions = list;
+            PostMessageW(h, WM_SL_VERSIONS, 0, 0);
+        }
     } else {
         std::string* s = new std::string("Не удалось загрузить список версий");
         PostMessageW(h, WM_SL_STATUS, 0, (LPARAM)s);
@@ -690,7 +706,13 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return 0;
         }
         case WM_DESTROY:
+            g_app_stopping = true;
             PostQuitMessage(0);
+            return 0;
+
+        case WM_CLOSE:
+            g_app_stopping = true;
+            DestroyWindow(h);
             return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -784,7 +806,7 @@ static const char* labels[] = { "Главная", "Аккаунт", "Моды", 
 
 void LauncherApp::run() {
     MSG msg;
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    while (GetMessageW(&msg, nullptr, 0, 0) != 0) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
